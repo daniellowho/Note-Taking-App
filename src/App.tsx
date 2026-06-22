@@ -34,6 +34,7 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState("");
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const [showSettings, setShowSettings] = useState(false);
+  const [isVoiceRecordingActive, setIsVoiceRecordingActive] = useState(false);
 
   // Sync state changes with localStorage for persistent state engine !
   useEffect(() => {
@@ -41,6 +42,7 @@ export default function App() {
   }, [notes]);
 
   const addToast = (text: string, type: "success" | "info" | "error") => {
+    if (isVoiceRecordingActive) return; // Suppress enqueuing toasts during recording
     const id = `${Date.now()}`;
     setToasts((prev) => [...prev, { id, text, type }]);
     setTimeout(() => {
@@ -83,22 +85,59 @@ export default function App() {
   };
 
   // Save the transcribed audio recording block as a brand new note !
-  const handleSaveTranscriptAsNote = (titleText: string, contentText: string, durationText?: string) => {
+  const handleSaveTranscriptAsNote = async (titleText: string, contentText: string, durationText?: string) => {
+    const noteId = `note-${Date.now()}`;
     const newNote: Note = {
-      id: `note-${Date.now()}`,
+      id: noteId,
       title: titleText,
       content: contentText,
       category: "Idea",
       date: "Just now",
       pinned: false,
       collaborators: [],
-      tags: ["Audio", "Transcript"],
+      tags: ["Audio", "Transcript", "Analyzing Themes..."],
       duration: durationText || "0:45",
       aiSummary: `* Summary: Automatically captured vocal stream session outlining design and strategic specifications with dynamic timeline highlights.`
     };
 
     setNotes((prev) => [newNote, ...prev]);
-    addToast("Vocal transcript synced to library!", "success");
+    addToast("Vocal transcript synced! Analyzing themes...", "info");
+
+    try {
+      const res = await fetch("/api/ai/detect-tags", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: contentText }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setNotes((prev) =>
+          prev.map((n) =>
+            n.id === noteId
+              ? {
+                  ...n,
+                  tags: Array.isArray(data.tags) && data.tags.length > 0 ? data.tags : ["Audio", "Transcript"],
+                  category: (data.category as any) || n.category,
+                }
+              : n
+          )
+        );
+        addToast(`AI tagged note as: ${data.tags.join(", ")}`, "success");
+      }
+    } catch (err) {
+      console.warn("Error detecting themes via Gemini API:", err);
+      // Fallback
+      setNotes((prev) =>
+        prev.map((n) =>
+          n.id === noteId
+            ? {
+                ...n,
+                tags: ["Audio", "Transcript", "Personal"],
+              }
+            : n
+        )
+      );
+    }
   };
 
   const handleDeleteNote = (id: string) => {
@@ -116,25 +155,27 @@ export default function App() {
     <div className="min-h-screen bg-background text-on-surface flex flex-col md:pl-20 relative select-none">
       
       {/* Toast Cues Overlay */}
-      <div className="fixed top-20 right-6 z-[100] flex flex-col gap-3 max-w-sm pointer-events-none">
-        {toasts.map((t) => (
-          <div
-            key={t.id}
-            className={`pointer-events-auto flex items-center gap-3 px-4 py-3 rounded-2xl shadow-lg border text-sm font-sans font-medium animate-bounce ${
-              t.type === "success"
-                ? "bg-[#D1FAE5] text-[#065F46] border-[#10B981]/30"
-                : t.type === "error"
-                ? "bg-[#FEE2E2] text-[#991B1B] border-[#EF4444]/30"
-                : "bg-[#EFF6FF] text-[#1E40AF] border-[#3B82F6]/30"
-            }`}
-          >
-            {t.type === "success" && <Check size={16} />}
-            {t.type === "error" && <AlertCircle size={16} />}
-            {t.type === "info" && <Info size={16} />}
-            <span>{t.text}</span>
-          </div>
-        ))}
-      </div>
+      {!isVoiceRecordingActive && (
+        <div className="fixed top-20 right-6 z-[100] flex flex-col gap-3 max-w-sm pointer-events-none">
+          {toasts.map((t) => (
+            <div
+              key={t.id}
+              className={`pointer-events-auto flex items-center gap-3 px-4 py-3 rounded-2xl shadow-lg border text-sm font-sans font-medium animate-bounce ${
+                t.type === "success"
+                  ? "bg-[#D1FAE5] text-[#065F46] border-[#10B981]/30"
+                  : t.type === "error"
+                  ? "bg-[#FEE2E2] text-[#991B1B] border-[#EF4444]/30"
+                  : "bg-[#EFF6FF] text-[#1E40AF] border-[#3B82F6]/30"
+              }`}
+            >
+              {t.type === "success" && <Check size={16} />}
+              {t.type === "error" && <AlertCircle size={16} />}
+              {t.type === "info" && <Info size={16} />}
+              <span>{t.text}</span>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Settings Modal Dialog Overlay */}
       {showSettings && (
@@ -264,6 +305,7 @@ export default function App() {
                 onAddToast={addToast}
                 autoStart={autoStartVoice}
                 onResetAutoStart={() => setAutoStartVoice(false)}
+                onRecordingStateChange={setIsVoiceRecordingActive}
               />
             )}
 

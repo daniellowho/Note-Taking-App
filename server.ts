@@ -1,7 +1,7 @@
 import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
 
 dotenv.config();
@@ -145,6 +145,97 @@ Provide a well-structured, 2-3 paragraph answer. Include bullet points or action
     let answer = `Regarding your question "${question}":\n\nBased on the note's focus, the primary recommendation is to divide the deployment into three clear phases: client-side visual validation, API routing verification, and robust data synchronizations.\n\nNext steps:\n1. Conduct user-testing sessions on soft-minimal layout changes.\n2. Verify state stability under heavy asynchronous rendering loops.\n3. Implement local caching fallbacks for high-efficiency mobile access.`;
     return res.json({
       answer,
+      isFallback: true,
+      message: error.message || "Simulated response activated."
+    });
+  }
+});
+
+// AI Endpoint: Automatically detect key themes and assign relevant tags
+app.post("/api/ai/detect-tags", async (req, res) => {
+  const { content } = req.body;
+
+  if (!content) {
+    return res.status(400).json({ error: "Content is required." });
+  }
+
+  try {
+    const ai = getAIClient();
+    const prompt = `You are an advanced text classifier and meta-tagging AI engine for Nova Notes.
+Analyze the following transcript of a voice recording or note, detect its key themes, and suggest up to 3 highly relevant tags from these (or other similar clean single-word labels, prioritized in Title Case):
+Common tags: "Meeting", "Brainstorm", "Personal", "Strategy", "Creative", "To-Do", "Interview", "Reference", "Review".
+Also return an appropriate category from: 'Strategy' | 'Draft' | 'Urgent' | 'Idea' | 'General' | 'Reminder' | 'Event'.
+
+Note/Transcript:
+${content}
+
+Provide your response in JSON format matching the schema:
+{
+  "tags": ["Tag1", "Tag2", "Tag3"],
+  "category": "Idea"
+}`;
+
+    const response = await ai.models.generateContent({
+      model: "gemini-3.5-flash",
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            tags: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.STRING,
+              },
+              description: "Up to 3 relevant tags like Meeting, Brainstorm, Personal, Strategy, etc."
+            },
+            category: {
+              type: Type.STRING,
+              description: "The most appropriate category among Strategy, Draft, Urgent, Idea, General, Reminder, Event."
+            }
+          },
+          required: ["tags", "category"]
+        }
+      }
+    });
+
+    const data = JSON.parse(response.text?.trim() || "{}");
+    return res.json({
+      tags: Array.isArray(data.tags) ? data.tags : ["Audio", "Transcript"],
+      category: data.category || "Idea",
+    });
+  } catch (error: any) {
+    console.error("AI Detect tags error:", error);
+    
+    // Smart heuristic fallback based on keyword matching
+    let tags = ["Audio", "Transcript"];
+    let category = "Idea";
+    const lowerContent = content.toLowerCase();
+
+    if (lowerContent.includes("meeting") || lowerContent.includes("discuss") || lowerContent.includes("sync")) {
+      tags.push("Meeting");
+      category = "Strategy";
+    } else if (lowerContent.includes("brainstorm") || lowerContent.includes("idea") || lowerContent.includes("creative") || lowerContent.includes("concept")) {
+      tags.push("Brainstorm");
+      category = "Idea";
+    } else if (lowerContent.includes("personal") || lowerContent.includes("myself") || lowerContent.includes("home") || lowerContent.includes("weekend")) {
+      tags.push("Personal");
+      category = "General";
+    } else if (lowerContent.includes("urgent") || lowerContent.includes("asap") || lowerContent.includes("priority")) {
+      tags.push("Urgent");
+      category = "Urgent";
+    } else {
+      tags.push("General");
+      category = "General";
+    }
+
+    // Keep unique tag elements, max 3
+    tags = Array.from(new Set(tags)).slice(0, 3);
+
+    return res.json({
+      tags,
+      category,
       isFallback: true,
       message: error.message || "Simulated response activated."
     });

@@ -31,6 +31,7 @@ interface VoiceRecorderViewProps {
   onAddToast: (text: string, type: "success" | "info" | "error") => void;
   autoStart?: boolean;
   onResetAutoStart?: () => void;
+  onRecordingStateChange?: (active: boolean) => void;
 }
 
 export default function VoiceRecorderView({
@@ -41,6 +42,7 @@ export default function VoiceRecorderView({
   onAddToast,
   autoStart = false,
   onResetAutoStart,
+  onRecordingStateChange,
 }: VoiceRecorderViewProps) {
   // Active Recording States
   const [isRecording, setIsRecording] = useState(false);
@@ -73,6 +75,18 @@ export default function VoiceRecorderView({
       (n) => n.tags.includes("Audio") || n.tags.includes("Transcript") || n.audioUrl !== undefined
     );
   }, [notes]);
+
+  // Sync isRecording state with parent callback
+  useEffect(() => {
+    if (onRecordingStateChange) {
+      onRecordingStateChange(isRecording);
+    }
+    return () => {
+      if (onRecordingStateChange) {
+        onRecordingStateChange(false);
+      }
+    };
+  }, [isRecording, onRecordingStateChange]);
 
   // Find the details of the most recently saved recording to show as on-screen notification
   const recentSavedNote = useMemo(() => {
