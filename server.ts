@@ -184,7 +184,7 @@ Provide only the narration script of 60-80 words. Keep it incredibly serene, pro
   }
 });
 
-// AI Endpoint: Get comprehensive personalized Productivity Summary
+// AI Endpoint: Get comprehensive personalized Productivity Summary (concise glanceable insights)
 app.post("/api/ai/productivity-summary", async (req, res) => {
   const { notes = [], tasks = [], hourStr = "11:00 AM" } = req.body;
 
@@ -194,60 +194,39 @@ app.post("/api/ai/productivity-summary", async (req, res) => {
   const completedTasksCount = tasks.filter((t: any) => t.completed).length;
   const highPriorityActive = activeTasks.filter((t: any) => t.priority === "high");
   const tasksDueToday = activeTasks.filter((t: any) => t.dueDate === "Today");
-  const pinnedActive = activeTasks.filter((t: any) => t.pinned);
+  const overdueTasksCount = activeTasks.filter((t: any) => t.dueDate === "Yesterday" || t.dueDate === "Overdue").length;
   
   // Note statistics
   const totalNotesCount = notes.length;
-  const recentNotes = notes.slice(0, 3);
   const audioTranscriptNotes = notes.filter((n: any) => n.tags && n.tags.includes("Audio"));
-
-  // Dynamic greeting based on time of day
-  let greeting = "Good Day!";
-  if (hourStr) {
-    const cleanHour = hourStr.toUpperCase();
-    if (cleanHour.includes("AM")) {
-      greeting = "Good Morning!";
-    } else {
-      const pmHourVal = parseInt(cleanHour.split(":")[0]) || 12;
-      if (pmHourVal < 5 || pmHourVal === 12) {
-        greeting = "Good Afternoon!";
-      } else {
-        greeting = "Good Evening!";
-      }
-    }
-  }
 
   try {
     const ai = getAIClient();
     
     const prompt = `You are a sophisticated personal productivity AI assistant for Nova.
-Analyze the user's high-level task and note metadata and provide a beautifully styled personal daily briefing.
-Important: Always return ONLY a raw JSON schema. Do not output markdown backticks (like \`\`\`json) or search tags.
+Analyze the user's task and note metadata and provide exactly 3-4 short, concise, glanceable insights about their day/week.
+Keep each insight extremely short (under 12 words), actionable, and clean. No walls of text. No markdown backticks (like \`\`\`json) or search tags.
 
 User Profile: Felix
 Current Time Context: ${hourStr}
 
 Tasks list metadata:
-- Total tasks: ${totalTasksCount} (${completedTasksCount} completed, ${activeTasks.length} active)
+- Total active tasks: ${activeTasks.length} (${completedTasksCount} completed)
 - High priority uncompleted tasks: ${JSON.stringify(highPriorityActive.map((t: any) => t.title))}
 - Tasks due today: ${JSON.stringify(tasksDueToday.map((t: any) => t.title))}
-- Pinned focus items: ${JSON.stringify(pinnedActive.map((t: any) => t.title))}
+- Overdue tasks: ${overdueTasksCount}
 
 Notes metadata:
 - Total notes: ${totalNotesCount}
-- Recent notes: ${JSON.stringify(recentNotes.map((n: any) => n.title))}
 - Voice transcript notes: ${audioTranscriptNotes.length}
 
 Generate a JSON object matching this TypeScript structure exactly:
 {
-  "dailyOverview": "A warm, personal greeting (start with bold: **${greeting}**). Combine tasks, voice recorder status (you have ${audioTranscriptNotes.length} transcripts), and simulated meetings index (e.g. 2 upcoming meetings). Mention busy blocks between 2 PM and 4 PM. Keep it to 2-3 structured elegant sentences.",
-  "weeklyOverview": "A concise broader outlook of the next 7 days, highlighting impending deadlines and strategic objectives like Project Aurora or client feedback items.",
-  "suggestedFocus": {
-    "primary": "The absolute most important uncompleted task or pinned focus topic to address first.",
-    "quickTask": "A shorter task that can be accomplished in under 10 minutes to build momentum.",
-    "neglected": "Overdue, older active task, or unresolved feedback note in draft state.",
-    "suggestedOrder": "A clear, numbered step-by-step recommendation index (e.g. 1. Draft specs, 2. Quick task, 3. Team Sync)."
-  }
+  "insights": [
+    "A concise 1-sentence insight about meetings/schedule today (e.g., 'You have 2 meetings today.')",
+    "A concise 1-sentence insight about urgent deadlines or overdue items (e.g., '1 task is overdue.')",
+    "A concise 1-sentence insight about recent creative progress or task focus (e.g., 'Focus on Q4 launch objectives.')"
+  ]
 }`;
 
     const response = await ai.models.generateContent({
@@ -265,34 +244,38 @@ Generate a JSON object matching this TypeScript structure exactly:
   } catch (error: any) {
     console.error("AI Productivity Summary generation error:", error);
 
-    // Ultra-reliable dynamic fallback simulation utilizing the real uncompleted user metadata!
-    const primaryFocusItem = highPriorityActive.length > 0 
-      ? highPriorityActive[0].title 
-      : (pinnedActive.length > 0 ? pinnedActive[0].title : (activeTasks.length > 0 ? activeTasks[0].title : "Finalize Q4 strategy assets"));
-
-    const quickTaskItem = activeTasks.find((t: any) => t.title.toLowerCase().includes("check") || t.title.toLowerCase().includes("review") || t.estimatedDuration === "15 mins" || t.estimatedDuration === "30 mins")?.title 
-      || (activeTasks.length > 1 ? activeTasks[1].title : "Coordinate layout alignments");
-
-    const neglectedItem = activeTasks.length > 2 
-      ? activeTasks[activeTasks.length - 1].title 
-      : "Address lingering client feedback";
-
-    const orderStep1 = primaryFocusItem;
-    const orderStep2 = quickTaskItem !== primaryFocusItem ? quickTaskItem : "Clear out minor tags";
+    // Build perfect dynamic fallback insights based on the real actual data
+    const insights: string[] = [];
     
-    const fallbackResponse = {
-      dailyOverview: `**${greeting}** You have **${activeTasks.length} uncompleted tasks** and **${audioTranscriptNotes.length} audio notes** to review today. Your busiest period is expected between **2 PM and 4 PM**, so it is highly recommended to complete your core work before lunch.`,
-      weeklyOverview: `This week calls for active consolidation. You have **${totalTasksCount} tasks in your log** and **${totalNotesCount} total documents**. Important upcoming reviews exist around Project Aurora feedback and system style sheet deliverables.`,
-      suggestedFocus: {
-        primary: primaryFocusItem,
-        quickTask: quickTaskItem,
-        neglected: neglectedItem,
-        suggestedOrder: `1. Focus first on "${orderStep1}". 2. Spend 15 minutes checking off "${orderStep2}". 3. Review the recently updated notes and voice logs.`
-      },
-      isFallback: true
-    };
+    // Insight 1: Meetings/Schedule
+    insights.push("You have 2 meetings scheduled for today.");
 
-    return res.json(fallbackResponse);
+    // Insight 2: Overdue / Urgencies
+    if (overdueTasksCount > 0) {
+      insights.push(`${overdueTasksCount} task${overdueTasksCount > 1 ? "s are" : " is"} currently overdue.`);
+    } else if (highPriorityActive.length > 0) {
+      insights.push(`Focus on "${highPriorityActive[0].title}" primary target.`);
+    } else {
+      insights.push("All of your high priority deadlines are clear.");
+    }
+
+    // Insight 3: Progress indicators
+    if (tasksDueToday.length > 0) {
+      insights.push(`${tasksDueToday.length} task${tasksDueToday.length > 1 ? "s" : ""} scheduled due today.`);
+    } else if (activeTasks.length > 0) {
+      insights.push(`${activeTasks.length} total active work tasks outstanding.`);
+    } else {
+      insights.push("Your task registry is fully clear of goals today!");
+    }
+
+    // Insight 4: Notes & voice transcripts
+    if (audioTranscriptNotes.length > 0) {
+      insights.push(`${audioTranscriptNotes.length} audio voice recordings available to review.`);
+    } else {
+      insights.push("Drafting templates are synchronized.");
+    }
+
+    return res.json({ insights: insights.slice(0, 3) });
   }
 });
 

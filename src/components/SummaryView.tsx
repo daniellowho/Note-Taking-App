@@ -1,25 +1,16 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { 
   Sparkles, 
   Calendar, 
   Clock, 
-  CheckCircle2, 
-  ArrowRight, 
-  AlertCircle, 
-  Plus, 
-  FileText, 
-  Mic, 
   CheckSquare, 
-  Compass, 
-  BookOpen, 
-  Zap, 
-  TrendingUp, 
-  MoreHorizontal,
+  FileText, 
+  AlertCircle, 
   ChevronRight,
-  Pin
+  Bell
 } from "lucide-react";
 import { Note, Task } from "../types";
-import { motion, AnimatePresence } from "motion/react";
+import { motion } from "motion/react";
 
 interface SummaryViewProps {
   notes: Note[];
@@ -27,17 +18,6 @@ interface SummaryViewProps {
   onCreateNote: () => void;
   onAddToast: (text: string, type: "success" | "info" | "error") => void;
   onTriggerTaskCreate?: () => void;
-}
-
-interface AISummaryData {
-  dailyOverview: string;
-  weeklyOverview: string;
-  suggestedFocus: {
-    primary: string;
-    quickTask: string;
-    neglected: string;
-    suggestedOrder: string;
-  };
 }
 
 export default function SummaryView({
@@ -48,35 +28,42 @@ export default function SummaryView({
   onTriggerTaskCreate
 }: SummaryViewProps) {
   const [loading, setLoading] = useState(true);
-  const [summaryData, setSummaryData] = useState<AISummaryData | null>(null);
+  const [insights, setInsights] = useState<string[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
-  const [timeStr, setTimeStr] = useState("11:00 AM");
+  const [timeStr, setTimeStr] = useState("");
 
-  // Load actual tasks from local storage
-  const loadTasksAndData = () => {
+  // Hydrate tasks from localStorage
+  const loadTasks = () => {
     const saved = localStorage.getItem("nova_tasks_data");
     if (saved) {
       try {
         setTasks(JSON.parse(saved));
       } catch (e) {
-        console.error("Failed to parse cached tasks in Summary:", e);
+        console.error("Failed to parse cached tasks in SummaryView:", e);
       }
     }
   };
 
   useEffect(() => {
-    loadTasksAndData();
+    loadTasks();
+    
+    // Smooth time display update
+    const updateTime = () => {
+      const now = new Date();
+      setTimeStr(now.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" }));
+    };
+    updateTime();
+    const timerInterval = setInterval(updateTime, 30000);
 
-    // Trigger local clock hours
-    const now = new Date();
-    setTimeStr(now.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" }));
-
-    // Listen for storage changes
-    window.addEventListener("storage", loadTasksAndData);
-    return () => window.removeEventListener("storage", loadTasksAndData);
+    // Keep state fully synchronized on back-and-forth updates
+    window.addEventListener("storage", loadTasks);
+    return () => {
+      clearInterval(timerInterval);
+      window.removeEventListener("storage", loadTasks);
+    };
   }, []);
 
-  // Fetch or trigger the AI summary calculation on mount or update
+  // Fetch or trigger calculation
   useEffect(() => {
     const fetchSummary = async () => {
       setLoading(true);
@@ -91,43 +78,28 @@ export default function SummaryView({
           })
         });
         
-        if (!response.ok) throw new Error("Backend response error");
+        if (!response.ok) throw new Error("Backend error");
         const data = await response.json();
-        setSummaryData(data);
-      } catch (err) {
-        console.warn("AI Summary request failed or offline. Activated client-side recovery calculations.");
-        
-        // Client-side local calculation fallback (absolutely bulletproof!)
-        const activeTasks = tasks.filter(t => !t.completed);
-        const highPriority = activeTasks.filter(t => t.priority === "high");
-        const dueToday = activeTasks.filter(t => t.dueDate === "Today");
-        const voiceNotesCount = notes.filter(n => n.tags && n.tags.includes("Audio")).length;
-
-        // Formulate dynamic greeting
-        let greet = "Good Morning, Felix!";
-        const currentHour = new Date().getHours();
-        if (currentHour >= 12 && currentHour < 17) {
-          greet = "Good Afternoon, Felix!";
-        } else if (currentHour >= 17) {
-          greet = "Good Evening, Felix!";
+        if (data.insights && Array.isArray(data.insights)) {
+          setInsights(data.insights);
+        } else {
+          throw new Error("Invalid format");
         }
-
-        const fallbackData: AISummaryData = {
-          dailyOverview: `**${greet}** You have **${dueToday.length || activeTasks.length || 0} tasks**, **2 scheduled meetings**, and **${voiceNotesCount} vocal recordings** to review today. Your busiest period is between **2 PM and 4 PM**, so it's recommended to complete your high-priority work before lunch.`,
-          weeklyOverview: `Your upcoming week looks highly structured. You have **${activeTasks.length} uncompleted tasks** currently in circulation. Strategic deadlines are tracking Friday launch deliverables. Ensure you review Project Aurora client requests.`,
-          suggestedFocus: {
-            primary: highPriority.length > 0 
-              ? highPriority[0].title 
-              : (activeTasks.length > 0 ? activeTasks[0].title : "Finalize Q4 growth strategy pillars"),
-            quickTask: activeTasks.find(t => t.title.toLowerCase().includes("review") || t.title.toLowerCase().includes("check") || t.estimatedDuration === "15 mins" || t.estimatedDuration === "30 mins")?.title 
-              || (activeTasks.length > 1 ? activeTasks[1].title : "Examine latest styles"),
-            neglected: activeTasks.length > 2 
-              ? activeTasks[activeTasks.length - 1].title 
-              : "Sync marketing asset coordinates",
-            suggestedOrder: "1. Lock active high priority goals early. 2. Clear out rapid feedback loops. 3. Finalize scheduled alignment objectives."
-          }
-        };
-        setSummaryData(fallbackData);
+      } catch (err) {
+        // Dynamic frontend local fallback calculations
+        const activeTasksCount = tasks.filter(t => !t.completed).length;
+        const overdueCount = tasks.filter(t => !t.completed && (t.dueDate === "Yesterday" || t.dueDate === "Overdue")).length;
+        const fallbackInsights = [];
+        
+        fallbackInsights.push("You have 2 meetings scheduled today.");
+        if (overdueCount > 0) {
+          fallbackInsights.push(`${overdueCount} task${overdueCount > 1 ? "s are" : " is"} currently overdue.`);
+        } else {
+          fallbackInsights.push("All your high-priority targets are fully on track.");
+        }
+        fallbackInsights.push(`${activeTasksCount || 0} active task${activeTasksCount === 1 ? "" : "s"} left in your queue.`);
+        
+        setInsights(fallbackInsights.slice(0, 3));
       } finally {
         setLoading(false);
       }
@@ -136,396 +108,401 @@ export default function SummaryView({
     fetchSummary();
   }, [notes.length, tasks.length]);
 
-  // Pre-calculate filter states for Today's Overview widgets
-  const activeTasks = tasks.filter(t => !t.completed);
-  const tasksDueToday = activeTasks.filter(t => t.dueDate === "Today");
-  const highPriorityTasks = activeTasks.filter(t => t.priority === "high");
-  const pinnedTasks = activeTasks.filter(t => t.pinned);
-  
-  // Standard hardcoded meetings matching calendar/mock data
-  const upcomingMeetings = [
-    { time: "10:00 AM", title: "Stakeholder Sync", location: "Zoom Sync" },
-    { time: "2:00 PM", title: "Design Review", location: "Board Room" }
-  ];
+  // --- DATA INTERPRETATION CORES ---
 
-  // Recently unreviewed notes (recently updated typed notes, draft categories, or pinned notes)
-  const recentUnreviewedNotes = notes
-    .filter(n => n.category === "Draft" || n.category === "Idea" || n.pinned)
-    .slice(0, 2);
+  // 1. Today's Focus
+  const tasksDueToday = useMemo(() => {
+    return tasks.filter(t => !t.completed && t.dueDate === "Today");
+  }, [tasks]);
 
-  // Switch to tasks tab and trigger modal creation
-  const handleAddNewTaskAction = () => {
-    setActiveTab("tasks");
-    onAddToast("Opening task form...", "info");
-    if (onTriggerTaskCreate) {
-      setTimeout(() => onTriggerTaskCreate(), 100);
+  const meetingsToday = useMemo(() => {
+    return [
+      { id: "meet-1", time: "10:00 AM", title: "Stakeholder Sync", location: "Zoom Coordinator" },
+      { id: "meet-2", time: "2:00 PM", title: "Design Review", location: "Main Board" }
+    ];
+  }, []);
+
+  const eventsToday = useMemo(() => {
+    const customEvents = notes.filter(n => n.category === "Event" && (n.date === "Today" || n.date === new Date().toISOString().split("T")[0]));
+    if (customEvents.length > 0) {
+      return customEvents.map(e => ({ id: e.id, title: e.title, time: e.reminderTime || "All Day" }));
     }
+    return [{ id: "fallback-ev-1", title: "Nova Project v1.1 Deployment Warm-up", time: "All Day" }];
+  }, [notes]);
+
+  const remindersToday = useMemo(() => {
+    const activeReminders = [
+      ...tasks.filter(t => !t.completed && t.reminderActive && t.reminderTime).map(t => ({
+        id: `task-rem-${t.id}`,
+        title: t.title,
+        time: t.reminderTime || "09:00 AM"
+      })),
+      ...notes.filter(n => n.reminderActive && n.reminderTime).map(n => ({
+        id: `note-rem-${n.id}`,
+        title: n.title,
+        time: n.reminderTime || "09:00 AM"
+      }))
+    ];
+
+    if (activeReminders.length > 0) return activeReminders;
+
+    return [{
+      id: "fallback-rem-1",
+      title: "Review Q4 focus group audio transcripts",
+      time: "01:30 PM"
+    }];
+  }, [tasks, notes]);
+
+  // 2. This Week
+  const upcomingMeetingsList = useMemo(() => {
+    return [
+      { id: "meet-wk-1", day: "Tomorrow", time: "2:00 PM", title: "Design Review Showcase", location: "Board Room" },
+      { id: "meet-wk-2", day: "Thursday", time: "10:30 AM", title: "Quarterly alignment sync", location: "Google Meet" }
+    ];
+  }, []);
+
+  const upcomingDeadlinesList = useMemo(() => {
+    return tasks.filter(t => !t.completed && t.dueDate !== "Today" && t.dueDate !== "Yesterday" && t.dueDate !== "Overdue").slice(0, 3);
+  }, [tasks]);
+
+  const upcomingEventsList = useMemo(() => {
+    const customUpcomingEvents = notes.filter(n => n.category === "Event" && n.date !== "Today" && n.date !== "Yesterday");
+    if (customUpcomingEvents.length > 0) {
+      return customUpcomingEvents.map(e => ({ id: e.id, title: e.title, detail: `${e.date} at ${e.reminderTime || "All Day"}` }));
+    }
+    return [{ id: "fallback-wk-ev", title: "Cross-team Innovation Demo Showcase", detail: "Friday at 3:00 PM" }];
+  }, [notes]);
+
+  // 3. Needs Attention
+  const overdueTasksList = useMemo(() => {
+    return tasks.filter(t => !t.completed && (t.dueDate === "Yesterday" || t.dueDate === "Overdue"));
+  }, [tasks]);
+
+  const unfinishedHighPriority = useMemo(() => {
+    return tasks.filter(t => !t.completed && t.priority === "high" && t.dueDate !== "Yesterday" && t.dueDate !== "Overdue");
+  }, [tasks]);
+
+  const missedRemindersList = useMemo(() => {
+    // Collect active reminders on any past tasks/notes
+    return tasks.filter(t => !t.completed && t.reminderActive && (t.dueDate === "Yesterday" || t.dueDate === "Overdue"));
+  }, [tasks]);
+
+  // Determine section show state
+  const hasItemsUnderAttention = overdueTasksList.length > 0 || unfinishedHighPriority.length > 0 || missedRemindersList.length > 0;
+
+  // 4. Recent Activity
+  const recentNotesList = useMemo(() => {
+    return [...notes].slice(0, 3);
+  }, [notes]);
+
+  // Distinct visual colored tags for day highlights
+  const getDayColorTag = (dayStr: string) => {
+    const d = dayStr.toLowerCase();
+    if (d.includes("today")) {
+      return "bg-emerald-50 text-[#006d36] border border-emerald-100/60 font-black px-2 py-0.5 rounded-md";
+    }
+    if (d.includes("tomorrow")) {
+      return "bg-blue-50 text-blue-700 border border-blue-100/60 font-bold px-2 py-0.5 rounded-md";
+    }
+    if (d.includes("thursday")) {
+      return "bg-amber-50 text-amber-700 border border-amber-100/60 font-semibold px-2 py-0.5 rounded-md";
+    }
+    if (d.includes("friday") || d.includes("june 19")) {
+      return "bg-purple-50 text-purple-700 border border-purple-100/60 font-semibold px-2 py-0.5 rounded-md";
+    }
+    if (d.includes("saturday") || d.includes("sunday")) {
+      return "bg-rose-50 text-rose-700 border border-rose-100/60 font-bold px-2 py-0.5 rounded-md";
+    }
+    return "bg-slate-50 text-slate-500 border border-slate-150 px-2 py-0.5 rounded-md font-medium";
   };
 
   return (
-    <div className="w-full max-w-[840px] mx-auto px-4 md:px-6 py-6 font-sans select-none relative animate-fade-in text-slate-800">
+    <div className="w-full max-w-[620px] mx-auto px-4 md:px-6 py-8 font-sans select-none relative pb-28 animate-fade-in text-slate-800">
       
-      {/* 1. Header with greeting and dynamified time */}
-      <header className="mb-8 flex justify-between items-end border-b border-slate-200 pb-5">
+      {/* HEADER: Minimal title & dynamic synced clock */}
+      <header className="mb-8 flex justify-between items-baseline">
         <div>
           <span className="text-[10px] font-extrabold text-[#006d36] uppercase tracking-widest font-mono">
-            Personal Briefing Dashboard
+            Felix's Agenda
           </span>
-          <h1 className="text-3xl font-extrabold tracking-tight text-slate-900 mt-1">
-            Summary
+          <h1 className="text-3xl font-black text-slate-900 mt-0.5">
+            At a Glance
           </h1>
         </div>
-        <div className="text-right shrink-0">
-          <span className="text-xs font-bold text-slate-600 font-mono tracking-wider flex items-center gap-1.5 justify-end">
-            <Clock size={12} strokeWidth={2.5} />
-            {timeStr}
-          </span>
-          <p className="text-[10px] text-slate-500 font-medium">Synced in Real-time</p>
+        <div className="text-right flex items-center gap-1.5 text-slate-400 font-mono text-xs font-bold leading-none">
+          <Clock size={12} strokeWidth={2.5} />
+          {timeStr || "11:00 AM"}
         </div>
       </header>
 
-      {/* 2. Top section: Dynamic daily overview summary block */}
-      <section className="mb-8" id="summary-daily-brief">
-        <div className="relative overflow-hidden p-6 md:p-8 rounded-[24px] bg-gradient-to-br from-[#006d36]/10 via-[#006d36]/5 to-transparent border border-[#006d36]/20 shadow-sm">
-          <div className="absolute top-4 right-4 text-[#006d36]/30">
-            <Sparkles size={24} className="animate-pulse" />
+      {/* QUIET AI ROLE: Minimal glanceable insights */}
+      <section className="mb-6" id="ai-quick-glance-insights">
+        <div className="bg-emerald-50/60 border border-emerald-100/80 rounded-2xl p-4">
+          <div className="flex items-center gap-1.5 text-[10px] text-[#006d36] font-extrabold uppercase tracking-wider font-mono mb-2">
+            <Sparkles size={11} strokeWidth={2.8} />
+            AI Highlights
           </div>
-
-          <p className="text-xs font-bold text-[#006d36] uppercase tracking-widest mb-3 font-mono">
-            Focus of the Day
-          </p>
-
+          
           {loading ? (
-            <div className="space-y-2.5 animate-pulse">
-              <div className="h-4 bg-slate-200 rounded w-[95%]" />
-              <div className="h-4 bg-slate-200 rounded w-[85%]" />
-              <div className="h-4 bg-slate-200 rounded w-[60%]" />
+            <div className="space-y-1.5 animate-pulse py-1">
+              <div className="h-3 bg-slate-200/80 rounded w-[85%]" />
+              <div className="h-3 bg-slate-200/80 rounded w-[72%]" />
             </div>
           ) : (
-            <div className="text-base text-slate-800 leading-relaxed font-normal antialiased">
-              {summaryData?.dailyOverview ? (
-                // Formatting simple bold items on daily summary
-                summaryData.dailyOverview.split("**").map((chunk, index) => 
-                  index % 2 === 1 ? <strong key={index} className="font-extrabold text-slate-955">{chunk}</strong> : chunk
-                )
-              ) : (
-                <span>Welcome back! Accessing your active projects to prepare today's workspace parameters.</span>
-              )}
-            </div>
+            <ul className="space-y-1 text-xs text-slate-700 font-semibold leading-relaxed">
+              {insights.map((insight, index) => (
+                <li key={index} className="flex items-start gap-2">
+                  <span className="text-[#006d36] select-none text-xs leading-none">•</span>
+                  <span>{insight}</span>
+                </li>
+              ))}
+            </ul>
           )}
         </div>
       </section>
 
-      {/* 3. Grid for Today's Overview list + Suggested Focus */}
-      <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-start mb-8">
+      {/* SECTION 1: TODAY'S FOCUS (First thing user sees) */}
+      <section className="mb-8" id="section-todays-focus">
+        <h2 className="text-[10px] font-extrabold uppercase tracking-widest text-[#006d36] font-mono mb-3">
+          Today's Focus
+        </h2>
         
-        {/* Today's Overview column (List of events, tasks due, urgent, notes to review) */}
-        <section className="md:col-span-12 lg:col-span-7 space-y-6" id="summary-today-overview">
-          <div className="bg-white border border-slate-200 shadow-sm rounded-[24px] p-6">
-            <h2 className="text-sm font-extrabold text-slate-900 mb-4 flex items-center gap-2">
-              <span className="w-1.5 h-4 bg-[#006d36] rounded-full" />
-              Today's Overview
-            </h2>
-
-            <div className="space-y-4">
-              
-              {/* TASKS DUE TODAY */}
-              <div>
-                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider font-mono block mb-2">
-                  Tasks Due Today ({tasksDueToday.length})
-                </span>
-                {tasksDueToday.length > 0 ? (
-                  <div className="space-y-2">
-                    {tasksDueToday.map((task) => (
-                      <div key={task.id} className="flex items-center gap-2.5 bg-slate-50 p-2.5 rounded-xl border border-slate-200">
-                        <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
-                        <span className="text-xs font-bold text-slate-800 truncate flex-1">
-                          {task.title}
-                        </span>
-                        {task.estimatedDuration && (
-                          <span className="text-[9px] font-mono font-bold text-slate-600 bg-slate-200/60 px-1.5 py-0.5 rounded">
-                            {task.estimatedDuration}
-                          </span>
-                        )}
-                      </div>
-                    ))}
+        <div className="bg-white border border-slate-100 rounded-2xl p-4.5 shadow-sm space-y-4">
+          
+          {/* Due Today Tasks */}
+          <div>
+            <span className="text-[9px] font-black uppercase text-slate-400 tracking-wider">
+              Due Today
+            </span>
+            {tasksDueToday.length > 0 ? (
+              <div className="mt-1.5 space-y-1.5">
+                {tasksDueToday.map(t => (
+                  <div key={t.id} className="flex items-center gap-2.5">
+                    <CheckSquare size={13} className="text-[#006d36]" />
+                    <span className="text-xs font-bold text-slate-800 truncate">{t.title}</span>
                   </div>
-                ) : (
-                  <p className="text-xs text-slate-500 italic py-1 px-1">
-                    No active tasks scheduled due today.
-                  </p>
-                )}
+                ))}
               </div>
+            ) : (
+              <p className="text-xs text-slate-400 italic font-medium mt-1">No tasks due today.</p>
+            )}
+          </div>
 
-              {/* UPCOMING MEETINGS */}
-              <div className="pt-2 border-t border-slate-200">
-                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider font-mono block mb-2">
-                  Upcoming Meetings Today (2)
+          {/* Meetings Today */}
+          <div className="pt-3 border-t border-slate-50">
+            <span className="text-[9px] font-black uppercase text-slate-400 tracking-wider">
+              Meetings
+            </span>
+            <div className="mt-1.5 space-y-1.5">
+              {meetingsToday.map(m => (
+                <div key={m.id} className="flex items-baseline justify-between gap-4">
+                  <span className="text-xs font-bold text-slate-800 truncate">{m.title}</span>
+                  <span className={`text-[10px] font-mono shrink-0 border ${getDayColorTag("Today")}`}>{m.time}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Events Today */}
+          <div className="pt-3 border-t border-slate-50">
+            <span className="text-[9px] font-black uppercase text-slate-400 tracking-wider">
+              Events
+            </span>
+            <div className="mt-1.5 space-y-1.5">
+              {eventsToday.map(e => (
+                <div key={e.id} className="flex items-baseline justify-between gap-4">
+                  <span className="text-xs font-bold text-slate-850 truncate">{e.title}</span>
+                  <span className={`text-[10px] font-mono shrink-0 border ${getDayColorTag("Today")}`}>{e.time}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Reminders Today */}
+          <div className="pt-3 border-t border-slate-50">
+            <span className="text-[9px] font-black uppercase text-slate-400 tracking-wider">
+              Reminders
+            </span>
+            <div className="mt-1.5 space-y-1.5">
+              {remindersToday.map(r => (
+                <div key={r.id} className="flex items-baseline justify-between gap-4">
+                  <span className="text-xs font-semibold text-slate-700 truncate">{r.title}</span>
+                  <span className={`text-[10px] font-mono shrink-0 border ${getDayColorTag("Today")}`}>{r.time}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+        </div>
+      </section>
+
+      {/* SECTION 2: THIS WEEK (concise agenda outlook) */}
+      <section className="mb-8" id="section-upcoming-week">
+        <div className="flex justify-between items-center mb-3">
+          <h2 className="text-[10px] font-extrabold uppercase tracking-widest text-[#006d36] font-mono flex items-center gap-1.5">
+            <span className="w-1.5 h-1.5 bg-[#006d36] rounded-full" />
+            This Week
+          </h2>
+          <button
+            onClick={() => setActiveTab("calendar")}
+            className="px-3 py-1 bg-[#006d36] hover:bg-[#005128] text-white text-[10px] font-black uppercase tracking-wider rounded-lg cursor-pointer transition-all duration-200 border border-[#006d36]"
+          >
+            This Week Button
+          </button>
+        </div>
+        
+        <div className="bg-white border border-slate-100 rounded-2xl p-4.5 shadow-sm space-y-4">
+          
+          {/* Upcoming Meetings */}
+          <div>
+            <span className="text-[9px] font-black uppercase text-slate-400 tracking-wider">
+              Upcoming Meetings
+            </span>
+            <div className="mt-1.5 space-y-2">
+              {upcomingMeetingsList.map(m => (
+                <div key={m.id} className="flex items-baseline justify-between gap-4">
+                  <span className="text-xs font-bold text-slate-800 truncate">{m.title}</span>
+                  <span className={`text-[10px] font-mono shrink-0 border ${getDayColorTag(m.day)}`}>{m.day} @ {m.time}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Upcoming Deadlines */}
+          <div className="pt-3 border-t border-slate-50">
+            <span className="text-[9px] font-black uppercase text-slate-400 tracking-wider">
+              Upcoming Deadlines
+            </span>
+            {upcomingDeadlinesList.length > 0 ? (
+              <div className="mt-1.5 space-y-2">
+                {upcomingDeadlinesList.map(t => (
+                  <div key={t.id} className="flex items-baseline justify-between gap-4">
+                    <span className="text-xs font-semibold text-slate-700 truncate">{t.title}</span>
+                    <span className={`text-[10px] font-mono shrink-0 border ${getDayColorTag(t.dueDate)}`}>{t.dueDate}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-xs text-slate-400 italic font-medium mt-1">No deadlines scheduled.</p>
+            )}
+          </div>
+
+          {/* Upcoming Events */}
+          <div className="pt-3 border-t border-slate-50">
+            <span className="text-[9px] font-black uppercase text-slate-400 tracking-wider">
+              Upcoming Events
+            </span>
+            <div className="mt-1.5 space-y-2">
+              {upcomingEventsList.map(e => (
+                <div key={e.id} className="flex items-baseline justify-between gap-4">
+                  <span className="text-xs font-bold text-slate-850 truncate">{e.title}</span>
+                  <span className={`text-[10px] font-mono shrink-0 border ${getDayColorTag("Friday")}`}>{e.detail}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+        </div>
+      </section>
+
+      {/* SECTION 3: NEEDS ATTENTION (Overdue, high-priority, missed - hidden if empty) */}
+      {hasItemsUnderAttention && (
+        <section className="mb-8 animate-fade-in" id="section-needs-attention">
+          <h2 className="text-[10px] font-extrabold uppercase tracking-widest text-rose-600 font-mono mb-3">
+            Needs Attention
+          </h2>
+          
+          <div className="bg-rose-50/40 border border-rose-100 rounded-2xl p-4.5 space-y-3">
+            
+            {/* Overdue Tasks */}
+            {overdueTasksList.length > 0 && (
+              <div className="space-y-1.5">
+                <span className="text-[9px] font-black uppercase text-rose-600 tracking-wider block">
+                  Overdue Tasks
                 </span>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {upcomingMeetings.map((meet, ind) => (
-                    <div key={ind} className="bg-slate-50 p-2.5 rounded-xl border border-slate-200 flex flex-col">
-                      <span className="text-[10px] font-bold text-indigo-600 font-mono">{meet.time}</span>
-                      <span className="text-xs font-bold text-slate-800 mt-1">{meet.title}</span>
-                      <span className="text-[10px] text-slate-500 mt-0.5">{meet.location}</span>
+                {overdueTasksList.map(t => (
+                  <div key={t.id} className="flex items-center gap-2 text-xs font-bold text-slate-900 bg-white/70 px-2.5 py-1.5 rounded-xl border border-rose-100/30">
+                    <AlertCircle size={12} className="text-rose-600 shrink-0" />
+                    <span className="truncate flex-1">{t.title}</span>
+                    <span className={`text-[9px] font-mono border ${getDayColorTag("Overdue")}`}>{t.dueDate}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Unfinished Important Items */}
+            {unfinishedHighPriority.length > 0 && (
+              <div className="pt-2">
+                <span className="text-[9px] font-black uppercase text-rose-600 tracking-wider block mb-1.5">
+                  Action Items
+                </span>
+                <div className="space-y-1">
+                  {unfinishedHighPriority.map(t => (
+                    <div key={t.id} className="flex items-center gap-2 text-xs font-semibold text-slate-800">
+                      <span className="w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0" />
+                      <span className="truncate flex-1">{t.title}</span>
                     </div>
                   ))}
                 </div>
               </div>
+            )}
 
-              {/* HIGH PRIORITY OR OVERDUE ITEMS */}
-              {highPriorityTasks.length > 0 && (
-                <div className="pt-2 border-t border-slate-200">
-                  <span className="text-[10px] font-bold text-rose-600 uppercase tracking-wider font-mono block mb-2">
-                    🔴 High-Priority Items ({highPriorityTasks.length})
-                  </span>
-                  <div className="space-y-1.5">
-                    {highPriorityTasks.slice(0, 3).map((task) => (
-                      <div key={task.id} className="flex items-center gap-2 text-xs font-bold text-slate-800">
-                        <AlertCircle size={12} className="text-rose-500 shrink-0" />
-                        <span className="truncate flex-1">{task.title}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* RECENTLY CREATED NOTES TO REVIEW */}
-              <div className="pt-2 border-t border-slate-200">
-                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider font-mono block mb-2">
-                  Notes / Drafts to Review ({recentUnreviewedNotes.length})
+            {/* Missed active reminders */}
+            {missedRemindersList.length > 0 && (
+              <div className="pt-2">
+                <span className="text-[9px] font-black uppercase text-rose-600 tracking-wider block mb-1">
+                  Missed Reminders
                 </span>
-                {recentUnreviewedNotes.length > 0 ? (
-                  <div className="space-y-2">
-                    {recentUnreviewedNotes.map((note) => (
-                      <div 
-                        key={note.id} 
-                        onClick={() => setActiveTab("notes")}
-                        className="flex items-center gap-2 bg-slate-50 p-2 rounded-lg hover:bg-slate-100 cursor-pointer transition-colors border border-slate-100"
-                      >
-                        <FileText size={12} className="text-slate-500" />
-                        <span className="text-xs text-slate-705 font-bold truncate flex-1 hover:underline">
-                          {note.title || "Untitled draft"}
-                        </span>
-                        <ChevronRight size={12} className="text-slate-400" />
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-xs text-slate-500 italic py-1 px-1">
-                    No recent draft documents to review.
-                  </p>
-                )}
-              </div>
-
-            </div>
-          </div>
-        </section>
-
-        {/* Suggested Focus recommendations column (Quick tasks, overdue, suggesting completions order) */}
-        <section className="md:col-span-12 lg:col-span-5 space-y-6" id="summary-focus-recommendations">
-          
-          {/* Main Suggested Focus Card */}
-          <div className="bg-white border border-slate-200 shadow-sm rounded-[24px] p-6">
-            <h2 className="text-sm font-extrabold text-slate-900 mb-4 flex items-center gap-2">
-              <span className="w-1.5 h-4 bg-emerald-500 rounded-full" />
-              Suggested Focus
-            </h2>
-
-            {loading ? (
-              <div className="space-y-4 animate-pulse">
-                <div className="h-10 bg-slate-100 rounded" />
-                <div className="h-10 bg-slate-100 rounded" />
-                <div className="h-12 bg-slate-100 rounded" />
-              </div>
-            ) : (
-              <div className="space-y-4">
-                
-                {/* 1. Primary Focus Action */}
-                <div className="p-3 bg-emerald-50 border border-emerald-100 rounded-xl">
-                  <span className="text-[9px] font-bold text-emerald-700 uppercase tracking-widest block font-mono">
-                    👉 Primary Focus
-                  </span>
-                  <p className="text-xs font-bold text-slate-900 mt-1 leading-snug">
-                    {summaryData?.suggestedFocus?.primary || "No pending priority. Spawn some notes!"}
-                  </p>
+                <div className="space-y-1">
+                  {missedRemindersList.map(m => (
+                    <div key={m.id} className="text-xs text-slate-705 flex items-center gap-2">
+                      <Bell size={11} className="text-rose-500 shrink-0 animate-bounce" />
+                      <span className="truncate flex-1 font-semibold">{m.title}</span>
+                      <span className="text-[9px] font-mono text-slate-400 font-bold">{m.reminderTime}</span>
+                    </div>
+                  ))}
                 </div>
-
-                {/* 2. Quick task action */}
-                <div className="p-3 bg-indigo-50 border border-indigo-100 rounded-xl">
-                  <span className="text-[9px] font-bold text-indigo-700 uppercase tracking-widest block font-mono">
-                    ⏱️ Quick Win
-                  </span>
-                  <p className="text-xs font-bold text-slate-900 mt-1 leading-snug">
-                    {summaryData?.suggestedFocus?.quickTask || "Clear pending task tags."}
-                  </p>
-                </div>
-
-                {/* 3. Neglected task */}
-                <div className="p-3 bg-rose-50 border border-rose-100 rounded-xl">
-                  <span className="text-[9px] font-bold text-rose-700 uppercase tracking-widest block font-mono">
-                    ⚠️ Suggested Attention
-                  </span>
-                  <p className="text-xs font-bold text-slate-900 mt-1 leading-snug">
-                    {summaryData?.suggestedFocus?.neglected || "No standard lingering item."}
-                  </p>
-                </div>
-
-                {/* Suggested Completed Order */}
-                {summaryData?.suggestedFocus?.suggestedOrder && (
-                  <div className="pt-2 border-t border-slate-200">
-                    <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block font-mono mb-2">
-                       Recommended Sequencer
-                    </span>
-                    <p className="text-xs text-slate-700 leading-relaxed italic">
-                      {summaryData.suggestedFocus.suggestedOrder}
-                    </p>
-                  </div>
-                )}
-
               </div>
             )}
+
           </div>
         </section>
+      )}
 
-      </div>
-
-      {/* 4. "This Week" perspective details */}
-      <section className="mb-8" id="summary-this-week">
-        <div className="bg-white border border-slate-200 shadow-sm rounded-[24px] p-6 focus-within:ring-1 focus-within:ring-emerald-550/20">
-          <div className="flex items-center justify-between mb-4 border-b border-slate-200 pb-3">
-            <h2 className="text-sm font-extrabold text-slate-900 flex items-center gap-2">
-              <span className="w-1.5 h-4 bg-indigo-500 rounded-full" />
-              This Week
-            </h2>
-            <span className="text-[10px] font-bold text-slate-500 font-mono bg-slate-100 px-2 py-0.5 rounded">
-              Next 7 Days Outlook
-            </span>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-            
-            {/* Counts metrics */}
-            <div className="space-y-3">
-              <div className="flex justify-between items-center text-xs text-slate-600 font-bold">
-                <span>Upcoming Backlog Tasks</span>
-                <span className="font-mono font-bold text-slate-900">{activeTasks.length} tasks</span>
-              </div>
-              <div className="flex justify-between items-center text-xs text-slate-600 font-bold">
-                <span>Completed Tasks</span>
-                <span className="font-mono font-bold text-slate-900">{tasks.filter(t => t.completed).length} tasks</span>
-              </div>
-              <div className="flex justify-between items-center text-xs text-slate-600 font-bold">
-                <span>Important Deadlines Blocked</span>
-                <span className="font-mono font-bold text-rose-600">{activeTasks.filter(t => t.priority === "high" || t.dueDate === "Today").length} items</span>
-              </div>
-              <div className="flex justify-between items-center text-xs text-slate-600 font-bold">
-                <span>Incomplete Goals Tracker</span>
-                <span className="font-mono font-bold text-slate-700">Project Aurora launch</span>
-              </div>
-            </div>
-
-            {/* AI Generated summary for Week */}
-            <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl flex items-start gap-2">
-              <Sparkles size={14} className="text-[#006d36] mt-0.5 shrink-0" />
-              <div className="flex-1">
-                <span className="text-[9px] font-bold text-[#006d36] uppercase tracking-wider block font-mono">
-                  Weekly Brief Preview
-                </span>
-                {loading ? (
-                  <div className="space-y-2 mt-1.5 animate-pulse">
-                    <div className="h-3 bg-slate-200 rounded w-full" />
-                    <div className="h-3 bg-slate-200 rounded w-[90%]" />
-                  </div>
-                ) : (
-                  <p className="text-xs text-slate-705 mt-1 leading-relaxed font-semibold">
-                    {summaryData?.weeklyOverview || "Finalizing weekly deliverables across marketing tags and audio review metrics."}
-                  </p>
-                )}
-              </div>
-            </div>
-
-          </div>
-        </div>
-      </section>
-
-      {/* 5. Quick Actions Shortcuts widget at the bottom */}
-      <section className="mb-24" id="summary-quick-actions">
-        <h2 className="text-xs font-extrabold uppercase tracking-widest text-slate-500 font-mono mb-4">
-          ⚡ Quick Actions
+      {/* SECTION 4: RECENT ACTIVITY (Continue where you left off) */}
+      <section className="mb-12" id="section-recent-activity">
+        <h2 className="text-[10px] font-extrabold uppercase tracking-widest text-slate-400 font-mono mb-3">
+          Recent Activity
         </h2>
-
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-          
-          {/* Quick Action: Add New Task */}
-          <button
-            onClick={handleAddNewTaskAction}
-            className="flex flex-col items-center justify-center p-4 bg-white border border-slate-200 hover:border-[#006d36] hover:-translate-y-0.5 rounded-2xl shadow-sm text-center cursor-pointer transition-all active:scale-95 group"
-          >
-            <div className="w-9 h-9 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center mb-2.5 transition-transform group-hover:scale-110">
-              <Plus size={18} strokeWidth={2.8} />
-            </div>
-            <span className="text-xs font-bold text-slate-800 group-hover:text-[#006d36]">
-              Add New Task
-            </span>
-          </button>
-
-          {/* Quick Action: Create Note */}
-          <button
-            onClick={() => {
-              onCreateNote();
-              onAddToast("Draft note spawned.", "success");
-            }}
-            className="flex flex-col items-center justify-center p-4 bg-white border border-slate-200 hover:border-[#006d36] hover:-translate-y-0.5 rounded-2xl shadow-sm text-center cursor-pointer transition-all active:scale-95 group"
-          >
-            <div className="w-9 h-9 rounded-full bg-emerald-50 text-[#006d36] flex items-center justify-center mb-2.5 transition-transform group-hover:scale-110">
-              <FileText size={16} strokeWidth={2.5} />
-            </div>
-            <span className="text-xs font-bold text-slate-800 group-hover:text-[#006d36]">
-              Create Note
-            </span>
-          </button>
-
-          {/* Quick Action: Record Voice Note */}
-          <button
-            onClick={() => setActiveTab("voice")}
-            className="flex flex-col items-center justify-center p-4 bg-white border border-slate-200 hover:border-[#006d36] hover:-translate-y-0.5 rounded-2xl shadow-sm text-center cursor-pointer transition-all active:scale-95 group"
-          >
-            <div className="w-9 h-9 rounded-full bg-purple-50 text-purple-600 flex items-center justify-center mb-2.5 transition-transform group-hover:scale-110 font-bold">
-              <Mic size={16} strokeWidth={2.5} />
-            </div>
-            <span className="text-xs font-bold text-slate-800 group-hover:text-[#006d36]">
-              Record Voice
-            </span>
-          </button>
-
-          {/* Quick Action: View All Tasks */}
-          <button
-            onClick={() => setActiveTab("tasks")}
-            className="flex flex-col items-center justify-center p-4 bg-white border border-slate-200 hover:border-[#006d36] hover:-translate-y-0.5 rounded-2xl shadow-sm text-center cursor-pointer transition-all active:scale-95 group"
-          >
-            <div className="w-9 h-9 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center mb-2.5 transition-transform group-hover:scale-110">
-              <CheckSquare size={16} strokeWidth={2.5} />
-            </div>
-            <span className="text-xs font-bold text-slate-800 group-hover:text-[#006d36]">
-              View Tasks
-            </span>
-          </button>
-
-          {/* Quick Action: View All Notes */}
-          <button
-            onClick={() => setActiveTab("notes")}
-            className="flex flex-col items-center justify-center p-4 bg-white border border-slate-200 hover:border-[#006d36] hover:-translate-y-0.5 rounded-2xl shadow-sm text-center cursor-pointer transition-all active:scale-95 group"
-          >
-            <div className="w-9 h-9 rounded-full bg-orange-50 text-orange-600 flex items-center justify-center mb-2.5 transition-transform group-hover:scale-110">
-              <BookOpen size={16} strokeWidth={2.5} />
-            </div>
-            <span className="text-xs font-bold text-slate-800 group-hover:text-[#006d36]">
-              View Notes
-            </span>
-          </button>
-
-        </div>
+        
+        {recentNotesList.length > 0 ? (
+          <div className="space-y-2.5">
+            {recentNotesList.map(note => (
+              <button
+                key={note.id}
+                onClick={() => setActiveTab("notes")}
+                className="w-full text-left bg-white border border-slate-100 hover:border-slate-200 rounded-2xl p-3.5 shadow-sm hover:shadow transition-all duration-200 cursor-pointer flex items-center justify-between group active:scale-[0.99]"
+              >
+                <div className="flex items-center gap-3 min-w-0 pr-3">
+                  <div className="w-8 h-8 rounded-xl bg-slate-50 text-slate-400 group-hover:bg-[#006d36]/5 group-hover:text-[#006d36] flex items-center justify-center shrink-0 transition-colors">
+                    <FileText size={14} />
+                  </div>
+                  <div className="min-w-0">
+                    <span className="text-xs font-bold text-slate-800 truncate block">
+                      {note.title || "Untitled Note"}
+                    </span>
+                    <span className="text-[10px] text-slate-400 uppercase tracking-widest font-extrabold mt-0.5 block font-mono">
+                      {note.category} • {note.date}
+                    </span>
+                  </div>
+                </div>
+                <ChevronRight size={14} className="text-slate-300 group-hover:text-slate-500 transition-colors shrink-0" />
+              </button>
+            ))}
+          </div>
+        ) : (
+          <p className="text-xs text-slate-400 italic font-semibold pl-1">No notes created yet.</p>
+        )}
       </section>
 
     </div>

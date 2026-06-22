@@ -248,6 +248,10 @@ export default function App() {
                 onAddNote={handleAddNote}
                 onAddToast={addToast}
                 onDeleteNote={handleDeleteNote}
+                onNavigateToVoice={() => {
+                  setActiveTab("voice");
+                  setAutoStartVoice(true);
+                }}
               />
             )}
 

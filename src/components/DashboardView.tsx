@@ -30,6 +30,7 @@ interface DashboardViewProps {
   onAddNote: (note: Note) => void;
   onAddToast?: (text: string, type: "success" | "info" | "error") => void;
   onDeleteNote?: (id: string) => void;
+  onNavigateToVoice?: () => void;
 }
 
 // Conceptual terms mapping for Semantic AI Search (Synonyms and Intent Matching)
@@ -69,6 +70,7 @@ export default function DashboardView({
   onAddNote,
   onAddToast,
   onDeleteNote,
+  onNavigateToVoice,
 }: DashboardViewProps) {
   const [filterType, setFilterType] = useState<"all" | "voice" | "text">("all");
   const [localQuery, setLocalQuery] = useState(searchQuery);
@@ -78,6 +80,7 @@ export default function DashboardView({
   const [waveformHeights, setWaveformHeights] = useState<number[]>([]);
   const [semanticResults, setSemanticResults] = useState<Record<string, { score: number; reason: string }> | null>(null);
   const [isSearchingAI, setIsSearchingAI] = useState(false);
+  const [showNewNoteDialog, setShowNewNoteDialog] = useState(false);
   
   // Sync the local search query if the global search query changes
   useEffect(() => {
@@ -332,8 +335,8 @@ export default function DashboardView({
     <div className="w-full max-w-[1280px] mx-auto px-6 pb-24 pt-6 font-sans animate-fade-in">
       
       {/* Sleek Top Hero Row with Minimalist Actions */}
-      <section className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 mb-10 pb-6 border-b border-outline-variant/15">
-        <div>
+      <section className="flex flex-col md:flex-row justify-between items-stretch md:items-center gap-6 mb-10 pb-6 border-b border-outline-variant/15 w-full">
+        <div className="flex-1">
           <div className="flex items-center gap-2.5 mb-1.5">
             <h1 className="text-3xl font-extrabold tracking-tight text-on-surface">
               All Notes Hub
@@ -347,16 +350,72 @@ export default function DashboardView({
           </p>
         </div>
 
-        {/* Minimal compact quick-action trigger buttons instead of a massive create note box */}
-        <div className="flex items-center gap-3 shrink-0">
+        {/* Minimal compact quick-action trigger buttons with nested popover dropdown - Aligned to the Right */}
+        <div className="flex items-center justify-end gap-3 shrink-0 relative self-end md:self-auto">
           <button
-            onClick={onCreateNote}
+            onClick={() => setShowNewNoteDialog(!showNewNoteDialog)}
             className="px-5 py-3 rounded-2xl bg-primary text-on-primary hover:bg-primary/95 text-xs font-bold shadow-sm hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center gap-2 cursor-pointer"
-            title="Create Text Draft Note"
+            title="Create New Note (Text or Voice)"
           >
             <Plus size={16} strokeWidth={2.5} />
             <span>New Note</span>
           </button>
+
+          {showNewNoteDialog && (
+            <>
+              {/* Overlay Backdrop to dismiss popover when clicking anywhere else */}
+              <div 
+                className="fixed inset-0 z-30 cursor-default"
+                onClick={() => setShowNewNoteDialog(false)}
+              />
+              <div
+                id="new-note-popover"
+                className="absolute top-full right-0 mt-2 z-40 bg-white border border-slate-100 rounded-2xl w-60 p-2 shadow-xl animate-fade-in text-slate-800"
+              >
+                <div className="text-[9px] font-extrabold uppercase tracking-wider text-slate-400 font-mono px-2 py-1 mb-1 text-left">
+                  Select Type
+                </div>
+                <div className="space-y-0.5">
+                  <button
+                    onClick={() => {
+                      setShowNewNoteDialog(false);
+                      onCreateNote();
+                    }}
+                    className="w-full flex items-center gap-2.5 p-2 hover:bg-indigo-50/40 rounded-xl text-left transition-colors cursor-pointer group"
+                  >
+                    <div className="w-7 h-7 rounded-lg bg-indigo-50 text-indigo-500 group-hover:bg-indigo-100 flex items-center justify-center shrink-0">
+                      <FileText size={14} strokeWidth={2.5} />
+                    </div>
+                    <div>
+                      <div className="text-xs font-bold text-slate-900 leading-tight">Standard Note</div>
+                      <div className="text-[9px] text-slate-400 font-semibold leading-none mt-0.5">Rich text format</div>
+                    </div>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setShowNewNoteDialog(false);
+                      if (onNavigateToVoice) {
+                        onNavigateToVoice();
+                      } else {
+                        onAddToast?.("Voice transcription workspace is coordinating sync...", "info");
+                      }
+                    }}
+                    className="w-full flex items-center gap-2.5 p-2 hover:bg-emerald-50/40 rounded-xl text-left transition-colors cursor-pointer group"
+                  >
+                    <div className="w-7 h-7 rounded-lg bg-emerald-50 text-emerald-600 group-hover:bg-emerald-100 flex items-center justify-center shrink-0 relative">
+                      <Mic size={14} strokeWidth={2.5} />
+                      <span className="absolute top-0.5 right-0.5 w-1 h-1 rounded-full bg-emerald-500" />
+                    </div>
+                    <div>
+                      <div className="text-xs font-bold text-slate-900 leading-tight">AI Voice Capture</div>
+                      <div className="text-[9px] text-slate-400 font-semibold leading-none mt-0.5">Automated transcription</div>
+                    </div>
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
         </div>
       </section>
 
@@ -687,7 +746,7 @@ export default function DashboardView({
       </section>
 
       {/* Decorative Accomplishments Illustration card */}
-      <section className="mt-16 flex flex-col items-center text-center py-8 bg-white/20 border border-outline-variant/10 rounded-[32px] p-8 max-w-2xl mx-auto soft-shadow animate-fade-in">
+      <section className="mt-16 flex flex-col items-center text-center py-8 bg-white/20 border border-outline-variant/10 rounded-[32px] p-8 max-w-2xl mx-auto soft-shadow animate-fade-in font-sans">
         <div className="relative w-40 h-40 mb-4">
           <div className="absolute inset-x-0 bottom-0 top-6 bg-primary/5 rounded-full blur-2xl"></div>
           <img
@@ -701,6 +760,8 @@ export default function DashboardView({
           Your centralized knowledge repository is synchronized across device systems automatically. Keep up the brilliant focus.
         </p>
       </section>
+
+
     </div>
   );
 }

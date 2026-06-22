@@ -50,6 +50,12 @@ export default function VoiceRecorderView({
   const [currentSpeech, setCurrentSpeech] = useState("");
   const recognitionRef = useRef<any>(null);
 
+  // Real Audio Analyser Refs for premium visual volume fluctuations
+  const audioContextRef = useRef<any>(null);
+  const audioStreamRef = useRef<any>(null);
+  const analyserRef = useRef<any>(null);
+  const animationFrameRef = useRef<any>(null);
+
   // Archive and Playback States
   const [searchQuery, setSearchQuery] = useState("");
   const [recentSavedId, setRecentSavedId] = useState<string | null>(null);
@@ -86,28 +92,150 @@ export default function VoiceRecorderView({
     );
   }, [audioRecordings, searchQuery]);
 
-  // Initialize simulated waveform heights for the recording screen
+  // Helper to safely cleanup resources
+  const cleanupAudioAnalyser = () => {
+    if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current);
+      animationFrameRef.current = null;
+    }
+    if (audioStreamRef.current) {
+      try {
+        audioStreamRef.current.getTracks().forEach((track: any) => track.stop());
+      } catch (e) {
+        console.warn("Error stopping audio tracks:", e);
+      }
+      audioStreamRef.current = null;
+    }
+    if (audioContextRef.current) {
+      try {
+        if (audioContextRef.current.state !== "closed") {
+          audioContextRef.current.close();
+        }
+      } catch (e) {
+        console.warn("Error closing audio context:", e);
+      }
+      audioContextRef.current = null;
+    }
+    analyserRef.current = null;
+  };
+
+  // Initialize simulated waveform heights for the recording screen with dynamic hardware audio detection
   useEffect(() => {
     const barsCount = 24;
-    setWaveformHeights(Array.from({ length: barsCount }, () => Math.floor(Math.random() * 60) + 10));
+    // Set symmetric steady waves when idle or constant
+    const makeConstantHeights = () =>
+      Array.from({ length: barsCount }, (_, idx) => 12 + Math.sin(idx * 0.4) * 3);
 
-    if (!isRecording) return;
+    setWaveformHeights(makeConstantHeights());
 
-    // Pulse the wave bars during recording
-    const waveInterval = setInterval(() => {
-      setWaveformHeights((prev) =>
-        prev.map(() => Math.floor(Math.random() * 85) + 15)
-      );
-    }, 120);
+    if (!isRecording) {
+      cleanupAudioAnalyser();
+      return;
+    }
 
     // Increment clock timer
     const timerInterval = setInterval(() => {
       setSeconds((prev) => prev + 1);
     }, 1000);
 
+    let realMicActive = false;
+    let fallbackPulseCounter = 0;
+
+    const setupRealAudio = async () => {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        audioStreamRef.current = stream;
+
+        const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+        if (!AudioContextClass) return;
+
+        const audioCtx = new AudioContextClass();
+        audioContextRef.current = audioCtx;
+
+        const source = audioCtx.createMediaStreamSource(stream);
+        const analyser = audioCtx.createAnalyser();
+        analyser.fftSize = 64; // Small size for responsive frequency bars
+        source.connect(analyser);
+        analyserRef.current = analyser;
+        realMicActive = true;
+
+        const bufferLength = analyser.frequencyBinCount;
+        const dataArray = new Uint8Array(bufferLength);
+
+        const renderRealWave = () => {
+          if (!isRecording || !analyserRef.current) return;
+
+          analyserRef.current.getByteFrequencyData(dataArray);
+
+          // Calculate average level
+          let total = 0;
+          for (let i = 0; i < bufferLength; i++) {
+            total += dataArray[i];
+          }
+          const averageVolume = total / bufferLength;
+
+          // If volume is quiet (below simple voice threshold, e.g. 10 out of 255), stay constant
+          if (averageVolume < 10) {
+            setWaveformHeights(makeConstantHeights());
+          } else {
+            // Speech or noise detected! Fluctuate frequencies beautifully
+            setWaveformHeights((prev) =>
+              prev.map((_, idx) => {
+                const val = dataArray[idx % bufferLength] || 0;
+                // Map the frequency value (usually 0 to 255) to percentage height (12% to 92%)
+                const heightPercent = 12 + (val / 255) * 80;
+                const noise = (Math.random() - 0.5) * 6; // Slight jitter for fluidity
+                return Math.max(8, Math.min(100, Math.floor(heightPercent + noise)));
+              })
+            );
+          }
+
+          animationFrameRef.current = requestAnimationFrame(renderRealWave);
+        };
+
+        animationFrameRef.current = requestAnimationFrame(renderRealWave);
+      } catch (err) {
+        console.log("Using smart simulation fallback for waveform visualization (hardware audio source blocked or denied):", err);
+        startSimulationFallback();
+      }
+    };
+
+    const startSimulationFallback = () => {
+      // Simulate real-life speech bursts when using a fallback (e.g. 3s speech, 2s pause)
+      const simulateInterval = setInterval(() => {
+        if (!isRecording) return;
+        
+        fallbackPulseCounter++;
+        // Create an alternating sequence of talking active vs silent/constant states
+        const isUserSpeaking = (fallbackPulseCounter % 5) === 1 || (fallbackPulseCounter % 5) === 2 || (fallbackPulseCounter % 5) === 3;
+
+        if (isUserSpeaking) {
+          // Voice detected: Fluctuate wave amplitudes dynamically
+          setWaveformHeights((prev) =>
+            prev.map(() => Math.floor(Math.random() * 65) + 20)
+          );
+        } else {
+          // Silent/Pause: Keep waveform completely static and still
+          setWaveformHeights(makeConstantHeights());
+        }
+      }, 120);
+
+      return () => clearInterval(simulateInterval);
+    };
+
+    let cleanupFallback: any = null;
+    setupRealAudio().then(() => {
+      if (!realMicActive) {
+        cleanupFallback = startSimulationFallback();
+      }
+    });
+
     return () => {
-      clearInterval(waveInterval);
       clearInterval(timerInterval);
+      cleanupAudioAnalyser();
+      if (cleanupFallback) {
+        cleanupFallback();
+      }
     };
   }, [isRecording]);
 
