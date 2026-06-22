@@ -1,0 +1,10 @@
+{
+  "name": "Remix: Remix: Remix: Remix: Nova Notes",
+  "description": "A calm productivity notes application with beautiful design, real-time audio session transcription, and intelligent summaries powered by Gemini.",
+  "requestFramePermissions": [
+    "microphone"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
