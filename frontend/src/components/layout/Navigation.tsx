@@ -77,13 +77,9 @@ export default function Navigation({
       <aside className="fixed left-0 top-0 h-full w-20 hidden md:flex flex-col items-center py-6 border-r border-slate-200 bg-white z-40 shadow-sm">
         
         {/* Workspace Brand Logo Icon Trigger */}
-        <div 
-          className="mb-10 cursor-pointer group hover:scale-105 active:scale-95 transition-transform select-none" 
-          onClick={() => setActiveTab("home")}
-          title="Nova Workspace Home"
-        >
+        <div className="mb-10 select-none" aria-label="Nova Workspace">
           <div className="w-12 h-12 bg-emerald-50 hover:bg-emerald-100/80 rounded-2xl flex items-center justify-center text-[#006d36] border border-[#006d36]/10 shadow-sm transition-all duration-300">
-            <Home size={22} strokeWidth={2.5} />
+            <Sparkles size={22} strokeWidth={2.5} />
           </div>
         </div>
 

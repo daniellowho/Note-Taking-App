@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { Note, Task } from "./types";
 import { INITIAL_NOTES, PROFILE_ME } from "./data";
 import Header from "./components/layout/Header";
@@ -19,6 +19,7 @@ interface ToastItem {
 }
 
 export default function App() {
+  const organizationRequestIds = useRef<Record<string, number>>({});
   const [activeTab, setActiveTab] = useState<string>("home");
   const [autoStartVoice, setAutoStartVoice] = useState(false);
   const [triggerTaskCreate, setTriggerTaskCreate] = useState(false);
@@ -73,6 +74,8 @@ export default function App() {
   // Update specific note content dynamically saved
   const organizeNote = async (note: Note) => {
     if (note.content.trim().length < 12) return;
+    const requestId = (organizationRequestIds.current[note.id] || 0) + 1;
+    organizationRequestIds.current[note.id] = requestId;
     try {
       const response = await fetch("/api/ai/organize-note", {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -80,20 +83,30 @@ export default function App() {
       });
       if (!response.ok) return;
       const analysis = await response.json();
+      // Do not let an older background request overwrite a more recent save.
+      if (organizationRequestIds.current[note.id] !== requestId) return;
       const relatedNoteIds = notes
         .filter(n => n.id !== note.id && n.content.toLowerCase().split(/\W+/).some(word => word.length > 4 && note.content.toLowerCase().includes(word)))
         .slice(0, 3).map(n => n.id);
-      const category = ["Strategy", "Draft", "Urgent", "Idea", "General", "Reminder", "Event"].includes(analysis.category) ? analysis.category as Note["category"] : note.category;
+      const category = ["Strategy", "Draft", "Urgent", "Idea", "General", "Reminder", "Event", "Meeting", "Task", "Personal"].includes(analysis.category) ? analysis.category as Note["category"] : note.category;
       const suggestions = [
         ...(analysis.eventTitle ? [{ type: "event" as const, title: analysis.eventTitle, time: analysis.eventTime }] : []),
         ...(analysis.reminder ? [{ type: "reminder" as const, title: analysis.title || note.title, time: analysis.reminder }] : []),
       ];
-      const organizedNote = {
-        ...note, title: note.title.trim() || analysis.title || note.title, aiSummary: analysis.summary || note.aiSummary,
-        category, tags: Array.from(new Set([...(note.tags || []), ...(analysis.tags || [])])), aiSuggestions: suggestions, relatedNoteIds,
-      };
-      setNotes(prev => prev.map(n => n.id === note.id ? organizedNote : n));
-      setActiveNote(prev => prev?.id === note.id ? organizedNote : prev);
+      setNotes(prev => prev.map(n => {
+        if (n.id !== note.id || n.title !== note.title || n.content !== note.content) return n;
+        return {
+          ...n, title: n.title.trim() || analysis.title || n.title, aiSummary: analysis.summary || n.aiSummary,
+          category, tags: Array.from(new Set([...(n.tags || []), ...(analysis.tags || [])])), aiSuggestions: suggestions, relatedNoteIds,
+        };
+      }));
+      setActiveNote(prev => {
+        if (!prev || prev.id !== note.id || prev.title !== note.title || prev.content !== note.content) return prev;
+        return {
+          ...prev, title: prev.title.trim() || analysis.title || prev.title, aiSummary: analysis.summary || prev.aiSummary,
+          category, tags: Array.from(new Set([...(prev.tags || []), ...(analysis.tags || [])])), aiSuggestions: suggestions, relatedNoteIds,
+        };
+      });
       if (analysis.eventTitle) setCalendarEvent({ title: analysis.eventTitle, time: analysis.eventTime, description: note.content, location: analysis.eventLocation, participants: analysis.eventParticipants });
       if (analysis.tasks?.length) {
         const stored = JSON.parse(localStorage.getItem("nova_tasks_data") || "[]") as Task[];
@@ -145,58 +158,8 @@ export default function App() {
     };
 
     setNotes((prev) => [newNote, ...prev]);
-    addToast("Vocal transcript synced! Analyzing themes...", "info");
+    addToast("Vocal transcript saved. Organizing quietly...", "info");
     void organizeNote(newNote);
-
-    try {
-      const res = await fetch("/api/ai/detect-tags", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: contentText }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setNotes((prev) =>
-          prev.map((n) =>
-            n.id === noteId
-              ? {
-                  ...n,
-                  tags: Array.from(new Set(["Audio", "Transcript", ...(Array.isArray(data.tags) ? data.tags : [])])),
-                  category: (data.category as any) || n.category,
-                }
-              : n
-          )
-        );
-        addToast(`AI tagged note as: ${data.tags.join(", ")}`, "success");
-      }
-    } catch (err) {
-      console.warn("Error detecting themes via Gemini API:", err);
-      // Fallback
-      setNotes((prev) =>
-        prev.map((n) =>
-          n.id === noteId
-            ? {
-                ...n,
-                tags: ["Audio", "Transcript", "Personal"],
-              }
-            : n
-        )
-      );
-    }
-
-    try {
-      const res = await fetch("/api/ai/summarize", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: titleText, content: contentText }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setNotes((prev) => prev.map((n) => n.id === noteId ? { ...n, aiSummary: data.summary } : n));
-      }
-    } catch (err) {
-      console.warn("Error summarizing voice transcript:", err);
-    }
     return newNote;
   };
 

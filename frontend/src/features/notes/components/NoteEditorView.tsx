@@ -670,6 +670,17 @@ export default function NoteEditorView({
             }}
           />
 
+          {content.trim() && (
+            <section className="mb-5 rounded-2xl border border-primary/15 bg-primary/5 p-4">
+              <div className="mb-2 flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-primary">
+                <Sparkles size={14} /> AI Summary
+              </div>
+              <p className="whitespace-pre-line text-sm leading-6 text-on-surface-variant">
+                {note.aiSummary || "Preparing a concise AI summary after this note is saved..."}
+              </p>
+            </section>
+          )}
+
           {note.aiSuggestions?.map((suggestion, index) => (
             <div key={`${suggestion.type}-${index}`} className="mt-4 flex items-center justify-between gap-3 rounded-2xl border border-outline-variant/25 bg-surface-container-low px-4 py-3 text-xs">
               <span className="text-on-surface-variant">{suggestion.type === "event" ? "Calendar suggestion" : "Reminder suggestion"}: <strong className="text-on-surface">{suggestion.title}</strong>{suggestion.time ? ` · ${suggestion.time}` : ""}</span>

@@ -1,10 +1,8 @@
 import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
-import { GoogleGenAI, Type, createPartFromBase64 } from "@google/genai";
-import dotenv from "dotenv";
-
-dotenv.config();
+import { Type, createPartFromBase64 } from "@google/genai";
+import { getAIClient } from "../ai/gemini";
 
 const app = express();
 app.use(express.json({ limit: "20mb" }));
@@ -39,26 +37,6 @@ app.post("/api/ai/transcribe", async (req, res) => {
     return res.status(502).json({ error: error.message || "Unable to transcribe the recording." });
   }
 });
-
-// Lazy initialize Gemini AI client
-let aiInstance: GoogleGenAI | null = null;
-function getAIClient(): GoogleGenAI {
-  if (!aiInstance) {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey || apiKey === "MY_GEMINI_API_KEY" || apiKey.trim() === "") {
-      throw new Error("Missing or invalid GEMINI_API_KEY environment variable.");
-    }
-    aiInstance = new GoogleGenAI({
-      apiKey: apiKey,
-      httpOptions: {
-        headers: {
-          'User-Agent': 'aistudio-build',
-        }
-      }
-    });
-  }
-  return aiInstance;
-}
 
 // AI Endpoint: Summarize note
 app.post("/api/ai/summarize", async (req, res) => {
@@ -115,7 +93,7 @@ app.post("/api/ai/organize-note", async (req, res) => {
     const ai = getAIClient();
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash",
-      contents: `Organize this personal note quietly. Generate a short, specific title, a concise 1-3 bullet summary, a category, action tasks, and an optional calendar/reminder suggestion. Only suggest an event when a real meeting/event is present. For an event, extract its title, date/time, location, participants, and useful description where stated.\n\nNote title: ${title}\nNote: ${content}\n\nReturn JSON only.`,
+      contents: `Organize this personal note quietly. Generate a short, specific title when it is blank, a concise 2-3 sentence summary, a category (Meeting, Task, Event, Idea, Personal, Strategy, Reminder, or General), action tasks, and an optional calendar/reminder suggestion. Only suggest an event when a real meeting/event is present. For an event, extract its title, date/time, location, participants, and useful description where stated.\n\nNote title: ${title}\nNote: ${content}\n\nReturn JSON only.`,
       config: {
         responseMimeType: "application/json",
         responseSchema: {
@@ -135,13 +113,14 @@ app.post("/api/ai/organize-note", async (req, res) => {
   } catch (error: any) {
     const sentences = content.split(/(?<=[.!?])\s+|\n+/).map((s: string) => s.trim()).filter(Boolean);
     const hasMeeting = /\b(meeting|call|sync|appointment)\b/i.test(content);
+    const isPersonal = /\b(i|my|family|home|personal)\b/i.test(content);
     const taskMatches = sentences.filter((s: string) => /\b(finish|send|prepare|complete|follow up|need to|todo)\b/i.test(s)).slice(0, 3);
     const timeMatch = content.match(/\b(tomorrow|today|monday|tuesday|wednesday|thursday|friday|saturday|sunday|\d{1,2}(?::\d{2})?\s?(?:am|pm))\b/i);
     return res.json({
       title: title.trim() || (hasMeeting ? "Meeting note" : sentences[0]?.split(" ").slice(0, 6).join(" ") || "Untitled note"),
       summary: sentences.slice(0, 3).map((s: string) => `* ${s}`).join("\n"),
-      category: hasMeeting ? "Event" : taskMatches.length ? "Reminder" : "General",
-      tags: hasMeeting ? ["Meeting"] : ["Note"], tasks: taskMatches,
+      category: hasMeeting ? "Meeting" : taskMatches.length ? "Task" : isPersonal ? "Personal" : "General",
+      tags: hasMeeting ? ["Meeting"] : taskMatches.length ? ["Task"] : isPersonal ? ["Personal"] : ["Note"], tasks: taskMatches,
       reminder: taskMatches.length && timeMatch ? timeMatch[0] : "",
       eventTitle: hasMeeting ? (title.trim() || "Meeting") : "",
       eventTime: hasMeeting && timeMatch ? timeMatch[0] : "",
@@ -559,13 +538,15 @@ async function startServer() {
   if (process.env.NODE_ENV !== "production") {
     // Mount Vite dev server
     const vite = await createViteServer({
+      configFile: path.join(process.cwd(), "frontend", "vite.config.ts"),
+      root: path.join(process.cwd(), "frontend"),
       server: { middlewareMode: true },
       appType: "spa",
     });
     app.use(vite.middlewares);
   } else {
     // Serve static compiled assets
-    const distPath = path.join(process.cwd(), "dist");
+    const distPath = path.join(process.cwd(), "dist", "frontend");
     app.use(express.static(distPath));
     app.get("*", (req, res) => {
       res.sendFile(path.join(distPath, "index.html"));

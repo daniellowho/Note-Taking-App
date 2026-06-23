@@ -2,7 +2,7 @@ export interface Note {
   id: string;
   title: string;
   content: string;
-  category: 'Strategy' | 'Draft' | 'Urgent' | 'Idea' | 'General' | 'Reminder' | 'Event';
+  category: 'Strategy' | 'Draft' | 'Urgent' | 'Idea' | 'General' | 'Reminder' | 'Event' | 'Meeting' | 'Task' | 'Personal';
   date: string;
   pinned: boolean;
   collaborators: string[];
