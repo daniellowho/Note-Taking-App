@@ -7,7 +7,7 @@ import { getAIClient } from "../ai/gemini";
 const app = express();
 app.use(express.json({ limit: "20mb" }));
 
-const PORT = 3000;
+const PORT = Number(process.env.PORT) || 3000;
 
 // AI Endpoint: transcribe a recorded voice memo. This works even where the
 // browser's optional Web Speech API is unavailable.
