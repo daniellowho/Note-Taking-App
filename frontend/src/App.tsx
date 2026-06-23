@@ -216,7 +216,7 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-background text-on-surface flex flex-col md:pl-20 relative select-none">
+    <div className="min-h-screen bg-background text-on-surface flex flex-col md:pl-64 relative select-none">
       
       {/* Toast Cues Overlay */}
       {!isVoiceRecordingActive && (
