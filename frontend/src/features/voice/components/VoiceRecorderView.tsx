@@ -73,6 +73,17 @@ export default function VoiceRecorderView({
   const [playbackSeconds, setPlaybackSeconds] = useState(0);
   const playbackIntervalRef = useRef<any>(null);
 
+  const getSupportedRecordingMimeType = () => {
+    if (typeof MediaRecorder === "undefined" || !MediaRecorder.isTypeSupported) return "";
+
+    return [
+      "audio/webm;codecs=opus",
+      "audio/webm",
+      "audio/mp4",
+      "audio/ogg;codecs=opus",
+    ].find((type) => MediaRecorder.isTypeSupported(type)) || "";
+  };
+
   // Derive audio recordings list from notes prop
   const audioRecordings = useMemo(() => {
     return notes.filter(
@@ -178,11 +189,14 @@ export default function VoiceRecorderView({
         analyserRef.current = analyser;
         if (typeof MediaRecorder !== "undefined") {
           recordedChunksRef.current = [];
-          const recorder = new MediaRecorder(stream);
+          const mimeType = getSupportedRecordingMimeType();
+          const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
           recorder.ondataavailable = (event) => {
             if (event.data.size > 0) recordedChunksRef.current.push(event.data);
           };
-          recorder.start();
+          // A timeslice makes mobile browsers flush chunks during the session
+          // instead of waiting until stop(), which is less reliable on phones.
+          recorder.start(1000);
           mediaRecorderRef.current = recorder;
         }
 
@@ -397,6 +411,9 @@ export default function VoiceRecorderView({
           const blob = new Blob(recordedChunksRef.current, { type: recorder.mimeType || "audio/webm" });
           resolve(blob.size ? { url: URL.createObjectURL(blob), blob } : {});
         };
+        try {
+          recorder.requestData();
+        } catch {}
         recorder.stop();
       });
       audioUrl = capturedAudio.url;
@@ -427,6 +444,10 @@ export default function VoiceRecorderView({
       } catch (error) {
         console.warn("Server transcription failed:", error);
       }
+    }
+
+    if (audioBlob && !fullText && !currentSpeech && finalContent.includes("No voice input detected")) {
+      finalContent = "[Audio recorded successfully, but transcription was unavailable. Use playback to listen to the original recording.]";
     }
 
     setIsRecording(false);
