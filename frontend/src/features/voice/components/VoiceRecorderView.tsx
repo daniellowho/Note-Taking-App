@@ -474,20 +474,19 @@ export default function VoiceRecorderView({
         const response = await fetch("/api/ai/transcribe", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
+          cache: "no-store",
           body: JSON.stringify({ audioBase64, mimeType: audioBlob.type || "audio/webm" }),
         });
-        if (response.ok) {
-          const raw = await response.text();
-          if (raw.trim()) {
-            try {
-              const data = JSON.parse(raw);
-              if (data.transcript?.trim()) finalContent = data.transcript.trim();
-            } catch (parseError) {
-              console.warn("Transcription response parse fallback triggered:", parseError);
-            }
+        const raw = await response.text();
+        if (raw.trim()) {
+          try {
+            const data = JSON.parse(raw);
+            if (data.transcript?.trim()) finalContent = data.transcript.trim();
+          } catch (parseError) {
+            console.warn("Transcription response parse fallback triggered:", parseError);
           }
-        } else {
-          console.warn("Server transcription failed:", await response.text());
+        } else if (!response.ok) {
+          console.warn("Server transcription failed with empty response body.");
         }
       } catch (error) {
         console.warn("Server transcription failed:", error);
