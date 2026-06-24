@@ -34,7 +34,12 @@ app.post("/api/ai/transcribe", async (req, res) => {
     return res.json({ transcript });
   } catch (error: any) {
     console.error("AI Transcribe error:", error);
-    return res.status(502).json({ error: error.message || "Unable to transcribe the recording." });
+    const message = error?.message || "Unable to transcribe the recording.";
+    return res.status(502).json({
+      error: message,
+      transcript: "",
+      isFallback: true,
+    });
   }
 });
 

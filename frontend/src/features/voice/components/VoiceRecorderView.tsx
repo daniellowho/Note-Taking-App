@@ -304,6 +304,9 @@ export default function VoiceRecorderView({
 
         rec.onerror = (e: any) => {
           console.warn("Speech recognition error:", e.error);
+          if (e.error === "no-speech") {
+            return;
+          }
           if (!recognitionShouldRunRef.current) return;
           if (recognitionRestartTimeoutRef.current) clearTimeout(recognitionRestartTimeoutRef.current);
           recognitionRestartTimeoutRef.current = setTimeout(() => {
@@ -474,8 +477,15 @@ export default function VoiceRecorderView({
           body: JSON.stringify({ audioBase64, mimeType: audioBlob.type || "audio/webm" }),
         });
         if (response.ok) {
-          const data = await response.json();
-          if (data.transcript?.trim()) finalContent = data.transcript.trim();
+          const raw = await response.text();
+          if (raw.trim()) {
+            try {
+              const data = JSON.parse(raw);
+              if (data.transcript?.trim()) finalContent = data.transcript.trim();
+            } catch (parseError) {
+              console.warn("Transcription response parse fallback triggered:", parseError);
+            }
+          }
         } else {
           console.warn("Server transcription failed:", await response.text());
         }
