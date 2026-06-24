@@ -17,7 +17,11 @@
     "jsx": "react-jsx",
     "paths": {
       "@/*": [
+<<<<<<< HEAD
         "./*"
+=======
+        "./frontend/src/*"
+>>>>>>> 5e63d0a636206e18ed54b28f86f4693bc69593c1
       ]
     },
     "allowImportingTsExtensions": true,
