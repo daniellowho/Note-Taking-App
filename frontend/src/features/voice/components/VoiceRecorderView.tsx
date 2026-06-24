@@ -51,6 +51,8 @@ export default function VoiceRecorderView({
   const [transcriptBlocks, setTranscriptBlocks] = useState<Array<{ time: string; text: string; tag: string }>>([]);
   const [currentSpeech, setCurrentSpeech] = useState("");
   const recognitionRef = useRef<any>(null);
+  const recognitionShouldRunRef = useRef(false);
+  const recognitionRestartTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordedChunksRef = useRef<Blob[]>([]);
   const audioPlayerRef = useRef<HTMLAudioElement | null>(null);
@@ -279,6 +281,7 @@ export default function VoiceRecorderView({
       (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
     if (SpeechRecognition && isRecording) {
+      recognitionShouldRunRef.current = true;
       try {
         const rec = new SpeechRecognition();
         rec.continuous = true;
@@ -301,14 +304,29 @@ export default function VoiceRecorderView({
 
         rec.onerror = (e: any) => {
           console.warn("Speech recognition error:", e.error);
+          if (!recognitionShouldRunRef.current) return;
+          if (recognitionRestartTimeoutRef.current) clearTimeout(recognitionRestartTimeoutRef.current);
+          recognitionRestartTimeoutRef.current = setTimeout(() => {
+            if (!recognitionShouldRunRef.current) return;
+            try {
+              rec.start();
+            } catch (restartError) {
+              console.warn("Speech recognition restart failed:", restartError);
+            }
+          }, 350);
         };
 
         rec.onend = () => {
-          if (isRecording) {
+          if (!recognitionShouldRunRef.current) return;
+          if (recognitionRestartTimeoutRef.current) clearTimeout(recognitionRestartTimeoutRef.current);
+          recognitionRestartTimeoutRef.current = setTimeout(() => {
+            if (!recognitionShouldRunRef.current) return;
             try {
               rec.start();
-            } catch {}
-          }
+            } catch (restartError) {
+              console.warn("Speech recognition restart failed:", restartError);
+            }
+          }, 250);
         };
 
         rec.start();
@@ -319,10 +337,16 @@ export default function VoiceRecorderView({
     }
 
     return () => {
+      recognitionShouldRunRef.current = false;
+      if (recognitionRestartTimeoutRef.current) {
+        clearTimeout(recognitionRestartTimeoutRef.current);
+        recognitionRestartTimeoutRef.current = null;
+      }
       if (recognitionRef.current) {
         try {
           recognitionRef.current.stop();
         } catch {}
+        recognitionRef.current = null;
       }
     };
   }, [isRecording]);
@@ -372,10 +396,16 @@ export default function VoiceRecorderView({
 
   // End active recording session
   const handleEndSession = async () => {
+    recognitionShouldRunRef.current = false;
+    if (recognitionRestartTimeoutRef.current) {
+      clearTimeout(recognitionRestartTimeoutRef.current);
+      recognitionRestartTimeoutRef.current = null;
+    }
     if (recognitionRef.current) {
       try {
         recognitionRef.current.stop();
       } catch {}
+      recognitionRef.current = null;
     }
 
     // Capture duration minutes:seconds

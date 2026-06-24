@@ -163,6 +163,21 @@ export default function NoteEditorView({
     }
   };
 
+  const handleExitEditor = () => {
+    handlePauseAudio();
+    onBack();
+  };
+
+  useEffect(() => {
+    return () => {
+      handlePauseAudio();
+      if (audioIntervalRef.current) {
+        clearInterval(audioIntervalRef.current);
+        audioIntervalRef.current = null;
+      }
+    };
+  }, []);
+
   const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = parseInt(e.target.value, 10);
     setAudioProgress(val);
@@ -368,7 +383,7 @@ export default function NoteEditorView({
       <header className="w-full bg-background flex items-center justify-between px-6 py-3 max-w-[1280px] mx-auto z-40">
         <div className="flex items-center gap-4">
           <button
-            onClick={onBack}
+            onClick={handleExitEditor}
             className="text-secondary hover:bg-surface-container-low p-2 rounded-full transition-all active:scale-95 cursor-pointer"
             id="editor-back-btn"
           >
@@ -398,13 +413,14 @@ export default function NoteEditorView({
               {isDeleteClicked ? (
                 <div className="flex items-center gap-1.5 bg-red-50 border border-red-200 rounded-full p-1 animate-fade-in font-sans">
                   <span className="text-[10px] text-red-700 font-extrabold px-1.5 select-none">Delete note?</span>
-                  <button
-                    onClick={() => {
-                      onDeleteNote(note.id);
-                      onBack();
-                    }}
-                    className="bg-red-600 text-white text-[10px] font-extrabold px-2 py-0.5 rounded-full hover:bg-red-700 active:scale-95 cursor-pointer shadow-sm"
-                  >
+                    <button
+                      onClick={() => {
+                        onDeleteNote(note.id);
+                        handlePauseAudio();
+                        onBack();
+                      }}
+                      className="bg-red-600 text-white text-[10px] font-extrabold px-2 py-0.5 rounded-full hover:bg-red-700 active:scale-95 cursor-pointer shadow-sm"
+                    >
                     Confirm
                   </button>
                   <button
