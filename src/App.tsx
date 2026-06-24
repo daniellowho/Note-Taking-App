@@ -18,6 +18,18 @@ interface ToastItem {
   type: "success" | "info" | "error";
 }
 
+const readJsonOrNull = async (response: Response) => {
+  const text = await response.text();
+  if (!text.trim()) return null;
+
+  try {
+    return JSON.parse(text);
+  } catch (error) {
+    console.warn("Expected JSON response but received malformed payload:", error);
+    return null;
+  }
+};
+
 export default function App() {
   const [activeTab, setActiveTab] = useState<string>("home");
   const [autoStartVoice, setAutoStartVoice] = useState(false);
@@ -110,19 +122,23 @@ export default function App() {
         body: JSON.stringify({ content: contentText }),
       });
       if (res.ok) {
-        const data = await res.json();
+        const data = await readJsonOrNull(res);
+        const tags = Array.isArray(data?.tags) && data.tags.length > 0 ? data.tags : ["Audio", "Transcript"];
         setNotes((prev) =>
           prev.map((n) =>
             n.id === noteId
               ? {
                   ...n,
-                  tags: Array.isArray(data.tags) && data.tags.length > 0 ? data.tags : ["Audio", "Transcript"],
-                  category: (data.category as any) || n.category,
+                  tags,
+                  category: (data?.category as any) || n.category,
                 }
               : n
           )
         );
-        addToast(`AI tagged note as: ${data.tags.join(", ")}`, "success");
+        addToast(`AI tagged note as: ${tags.join(", ")}`, "success");
+      } else {
+        const errorText = await res.text();
+        throw new Error(errorText || `Theme detection failed with status ${res.status}`);
       }
     } catch (err) {
       console.warn("Error detecting themes via Gemini API:", err);

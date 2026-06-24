@@ -9,6 +9,10 @@ dotenv.config();
 const app = express();
 app.use(express.json());
 
+app.get("/favicon.ico", (_req, res) => {
+  res.status(204).end();
+});
+
 const PORT = 3000;
 
 // Lazy initialize Gemini AI client
