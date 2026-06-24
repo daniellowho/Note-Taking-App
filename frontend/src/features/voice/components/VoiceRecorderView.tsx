@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from "react";
+import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import {
   Mic,
   StopCircle,
@@ -56,6 +56,8 @@ export default function VoiceRecorderView({
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordedChunksRef = useRef<Blob[]>([]);
   const audioPlayerRef = useRef<HTMLAudioElement | null>(null);
+  const recordingStartedAtRef = useRef<number | null>(null);
+  const elapsedSecondsRef = useRef(0);
 
   // Real Audio Analyser Refs for premium visual volume fluctuations
   const audioContextRef = useRef<any>(null);
@@ -165,9 +167,12 @@ export default function VoiceRecorderView({
       return;
     }
 
-    // Increment clock timer
+    // Keep the visible timer and transcript timestamps tied to the same source of truth.
     const timerInterval = setInterval(() => {
-      setSeconds((prev) => prev + 1);
+      if (!recordingStartedAtRef.current) return;
+      const elapsed = Math.floor((Date.now() - recordingStartedAtRef.current) / 1000);
+      elapsedSecondsRef.current = elapsed;
+      setSeconds(elapsed);
     }, 1000);
 
     const setupRealAudio = async () => {
@@ -275,6 +280,23 @@ export default function VoiceRecorderView({
     };
   }, [playingNoteId, notes]);
 
+  const getCurrentTimestamp = useCallback(() => {
+    const elapsed = elapsedSecondsRef.current;
+    const mins = Math.floor(elapsed / 60);
+    const secs = elapsed % 60;
+    return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
+  }, []);
+
+  const addSpeechBlock = useCallback((text: string) => {
+    if (!text.trim()) return;
+    const timeStr = getCurrentTimestamp();
+
+    setTranscriptBlocks((prev) => [
+      ...prev,
+      { time: timeStr, text: text.trim(), tag: "" },
+    ]);
+  }, [getCurrentTimestamp]);
+
   // Integrated Web Speech Recognition API
   useEffect(() => {
     const SpeechRecognition =
@@ -352,21 +374,7 @@ export default function VoiceRecorderView({
         recognitionRef.current = null;
       }
     };
-  }, [isRecording]);
-
-  const addSpeechBlock = (text: string) => {
-    if (!text.trim()) return;
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    const timeStr = `${mins.toString().padStart(2, "0")}:${secs
-      .toString()
-      .padStart(2, "0")}`;
-
-    setTranscriptBlocks((prev) => [
-      ...prev,
-      { time: timeStr, text: text.trim(), tag: "" },
-    ]);
-  };
+  }, [isRecording, addSpeechBlock]);
 
   // Format clock timer 00:00
   const formatTimeStr = (totalSecs: number) => {
@@ -377,6 +385,8 @@ export default function VoiceRecorderView({
 
   // Start new Voice session
   const handleStartRecording = () => {
+    recordingStartedAtRef.current = Date.now();
+    elapsedSecondsRef.current = 0;
     setShowMicPermissionPrompt(false);
     setSeconds(0);
     setTranscriptBlocks([]);
@@ -399,6 +409,11 @@ export default function VoiceRecorderView({
 
   // End active recording session
   const handleEndSession = async () => {
+    if (recordingStartedAtRef.current) {
+      const elapsed = Math.floor((Date.now() - recordingStartedAtRef.current) / 1000);
+      elapsedSecondsRef.current = elapsed;
+      setSeconds(elapsed);
+    }
     recognitionShouldRunRef.current = false;
     if (recognitionRestartTimeoutRef.current) {
       clearTimeout(recognitionRestartTimeoutRef.current);
@@ -412,8 +427,9 @@ export default function VoiceRecorderView({
     }
 
     // Capture duration minutes:seconds
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
+    const elapsed = elapsedSecondsRef.current;
+    const mins = Math.floor(elapsed / 60);
+    const secs = elapsed % 60;
     const durationLabel = `${mins}:${secs.toString().padStart(2, "0")}`;
 
     // Combine blocks into text
@@ -474,20 +490,19 @@ export default function VoiceRecorderView({
         const response = await fetch("/api/ai/transcribe", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
+          cache: "no-store",
           body: JSON.stringify({ audioBase64, mimeType: audioBlob.type || "audio/webm" }),
         });
-        if (response.ok) {
-          const raw = await response.text();
-          if (raw.trim()) {
-            try {
-              const data = JSON.parse(raw);
-              if (data.transcript?.trim()) finalContent = data.transcript.trim();
-            } catch (parseError) {
-              console.warn("Transcription response parse fallback triggered:", parseError);
-            }
+        const raw = await response.text();
+        if (raw.trim()) {
+          try {
+            const data = JSON.parse(raw);
+            if (data.transcript?.trim()) finalContent = data.transcript.trim();
+          } catch (parseError) {
+            console.warn("Transcription response parse fallback triggered:", parseError);
           }
-        } else {
-          console.warn("Server transcription failed:", await response.text());
+        } else if (!response.ok) {
+          console.warn("Server transcription failed with empty response body.");
         }
       } catch (error) {
         console.warn("Server transcription failed:", error);
