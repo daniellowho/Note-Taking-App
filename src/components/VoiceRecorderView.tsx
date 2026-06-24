@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from "react";
+import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import {
   Mic,
   StopCircle,
@@ -51,6 +51,8 @@ export default function VoiceRecorderView({
   const [transcriptBlocks, setTranscriptBlocks] = useState<Array<{ time: string; text: string; tag: string }>>([]);
   const [currentSpeech, setCurrentSpeech] = useState("");
   const recognitionRef = useRef<any>(null);
+  const recordingStartedAtRef = useRef<number | null>(null);
+  const elapsedSecondsRef = useRef(0);
 
   // Real Audio Analyser Refs for premium visual volume fluctuations
   const audioContextRef = useRef<any>(null);
@@ -147,9 +149,12 @@ export default function VoiceRecorderView({
       return;
     }
 
-    // Increment clock timer
+    // Keep the visible timer and transcript timestamps tied to the same source of truth.
     const timerInterval = setInterval(() => {
-      setSeconds((prev) => prev + 1);
+      if (!recordingStartedAtRef.current) return;
+      const elapsed = Math.floor((Date.now() - recordingStartedAtRef.current) / 1000);
+      elapsedSecondsRef.current = elapsed;
+      setSeconds(elapsed);
     }, 1000);
 
     let realMicActive = false;
@@ -279,6 +284,23 @@ export default function VoiceRecorderView({
     };
   }, [playingNoteId, notes]);
 
+  const getCurrentTimestamp = useCallback(() => {
+    const elapsed = elapsedSecondsRef.current;
+    const mins = Math.floor(elapsed / 60);
+    const secs = elapsed % 60;
+    return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
+  }, []);
+
+  const addSpeechBlock = useCallback((text: string) => {
+    if (!text.trim()) return;
+    const timeStr = getCurrentTimestamp();
+
+    setTranscriptBlocks((prev) => [
+      ...prev,
+      { time: timeStr, text: text.trim(), tag: "" },
+    ]);
+  }, [getCurrentTimestamp]);
+
   // Integrated Web Speech Recognition API
   useEffect(() => {
     const SpeechRecognition =
@@ -331,21 +353,7 @@ export default function VoiceRecorderView({
         } catch {}
       }
     };
-  }, [isRecording]);
-
-  const addSpeechBlock = (text: string) => {
-    if (!text.trim()) return;
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    const timeStr = `${mins.toString().padStart(2, "0")}:${secs
-      .toString()
-      .padStart(2, "0")}`;
-
-    setTranscriptBlocks((prev) => [
-      ...prev,
-      { time: timeStr, text: text.trim(), tag: "" },
-    ]);
-  };
+  }, [isRecording, addSpeechBlock]);
 
   // Automated background simulated transcript blocks during recording
   useEffect(() => {
@@ -367,7 +375,7 @@ export default function VoiceRecorderView({
     }, 12000);
 
     return () => clearInterval(simInterval);
-  }, [isRecording, seconds]);
+  }, [isRecording, addSpeechBlock]);
 
   // Format clock timer 00:00
   const formatTimeStr = (totalSecs: number) => {
@@ -378,10 +386,12 @@ export default function VoiceRecorderView({
 
   // Start new Voice session
   const handleStartRecording = () => {
+    recordingStartedAtRef.current = Date.now();
+    elapsedSecondsRef.current = 0;
     setSeconds(0);
     setTranscriptBlocks([
       {
-        time: "00:02",
+        time: "00:00",
         text: "Initiating live vocal session. Speech engine initialized.",
         tag: "System",
       }
@@ -406,6 +416,11 @@ export default function VoiceRecorderView({
   // End active recording session
   const handleEndSession = () => {
     setIsRecording(false);
+    if (recordingStartedAtRef.current) {
+      const elapsed = Math.floor((Date.now() - recordingStartedAtRef.current) / 1000);
+      elapsedSecondsRef.current = elapsed;
+      setSeconds(elapsed);
+    }
     if (recognitionRef.current) {
       try {
         recognitionRef.current.stop();
@@ -413,8 +428,9 @@ export default function VoiceRecorderView({
     }
 
     // Capture duration minutes:seconds
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
+    const elapsed = elapsedSecondsRef.current;
+    const mins = Math.floor(elapsed / 60);
+    const secs = elapsed % 60;
     const durationLabel = `${mins}:${secs.toString().padStart(2, "0")}`;
 
     // Combine blocks into text
