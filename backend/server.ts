@@ -220,7 +220,7 @@ app.post("/api/ai/detect-tags", async (req, res) => {
     const prompt = `You are an advanced text classifier and meta-tagging AI engine for Nova Notes.
 Analyze the following transcript of a voice recording or note, detect its key themes, and suggest up to 3 highly relevant tags from these (or other similar clean single-word labels, prioritized in Title Case):
 Common tags: "Meeting", "Brainstorm", "Personal", "Strategy", "Creative", "To-Do", "Interview", "Reference", "Review".
-Also return an appropriate category from: 'Strategy' | 'Draft' | 'Urgent' | 'Idea' | 'General' | 'Reminder' | 'Event'.
+Also return an appropriate category from: 'Strategy' | 'Draft' | 'Urgent' | 'Idea' | 'General' | 'Reminder' | 'Event' | 'Meeting'.
 
 Note/Transcript:
 ${content}
@@ -248,7 +248,7 @@ Provide your response in JSON format matching the schema:
             },
             category: {
               type: Type.STRING,
-              description: "The most appropriate category among Strategy, Draft, Urgent, Idea, General, Reminder, Event."
+              description: "The most appropriate category among Strategy, Draft, Urgent, Idea, General, Reminder, Event, Meeting."
             }
           },
           required: ["tags", "category"]
@@ -257,9 +257,13 @@ Provide your response in JSON format matching the schema:
     });
 
     const data = JSON.parse(response.text?.trim() || "{}");
+    const allowedCategories = ["Strategy", "Draft", "Urgent", "Idea", "General", "Reminder", "Event", "Meeting"];
+    const normalizedCategory = typeof data.category === "string"
+      ? allowedCategories.find((category) => category.toLowerCase() === data.category.trim().toLowerCase())
+      : undefined;
     return res.json({
       tags: Array.isArray(data.tags) ? data.tags : ["Audio", "Transcript"],
-      category: data.category || "Idea",
+      category: normalizedCategory || "Idea",
     });
   } catch (error: any) {
     console.error("AI Detect tags error:", error);
@@ -271,7 +275,7 @@ Provide your response in JSON format matching the schema:
 
     if (lowerContent.includes("meeting") || lowerContent.includes("discuss") || lowerContent.includes("sync")) {
       tags.push("Meeting");
-      category = "Strategy";
+      category = "Meeting";
     } else if (lowerContent.includes("brainstorm") || lowerContent.includes("idea") || lowerContent.includes("creative") || lowerContent.includes("concept")) {
       tags.push("Brainstorm");
       category = "Idea";

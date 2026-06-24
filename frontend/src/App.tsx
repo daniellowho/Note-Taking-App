@@ -39,6 +39,26 @@ export default function App() {
   const [googleAccessToken, setGoogleAccessToken] = useState<string | null>(null);
   const [calendarEvent, setCalendarEvent] = useState<{ title: string; time?: string; description: string; location?: string; participants?: string[] } | null>(null);
 
+  const noteCategories: Note["category"][] = ["Strategy", "Draft", "Urgent", "Idea", "General", "Reminder", "Event", "Meeting", "Task", "Personal"];
+
+  const normalizeCategory = (value: unknown, fallback: Note["category"] = "General"): Note["category"] => {
+    if (typeof value !== "string") return fallback;
+    const normalized = value.trim().toLowerCase();
+    const match = noteCategories.find((category) => category.toLowerCase() === normalized);
+    return match || fallback;
+  };
+
+  const inferMeetingCategory = (title: string, content: string): Note["category"] => {
+    const text = `${title} ${content}`.toLowerCase();
+    if (/\b(meeting|sync|standup|stand up|call|conference call|1:1|one on one|one-on-one|review meeting|kickoff|demo)\b/i.test(text)) {
+      return "Meeting";
+    }
+    if (/\b(event|calendar|appointment|schedule)\b/i.test(text)) {
+      return "Event";
+    }
+    return "Idea";
+  };
+
   // Sync state changes with localStorage for persistent state engine !
   useEffect(() => {
     localStorage.setItem("nova_notes_data", JSON.stringify(notes));
@@ -88,7 +108,10 @@ export default function App() {
       const relatedNoteIds = notes
         .filter(n => n.id !== note.id && n.content.toLowerCase().split(/\W+/).some(word => word.length > 4 && note.content.toLowerCase().includes(word)))
         .slice(0, 3).map(n => n.id);
-      const category = ["Strategy", "Draft", "Urgent", "Idea", "General", "Reminder", "Event", "Meeting", "Task", "Personal"].includes(analysis.category) ? analysis.category as Note["category"] : note.category;
+      const detectedCategory = normalizeCategory(analysis.category, note.category);
+      const category = detectedCategory === "Idea"
+        ? inferMeetingCategory(analysis.title || note.title, note.content)
+        : detectedCategory;
       const suggestions = [
         ...(analysis.eventTitle ? [{ type: "event" as const, title: analysis.eventTitle, time: analysis.eventTime }] : []),
         ...(analysis.reminder ? [{ type: "reminder" as const, title: analysis.title || note.title, time: analysis.reminder }] : []),
@@ -97,14 +120,14 @@ export default function App() {
         if (n.id !== note.id || n.title !== note.title || n.content !== note.content) return n;
         return {
           ...n, title: n.title.trim() || analysis.title || n.title, aiSummary: analysis.summary || n.aiSummary,
-          category, tags: Array.from(new Set([...(n.tags || []), ...(analysis.tags || [])])), aiSuggestions: suggestions, relatedNoteIds,
+          category, tags: Array.from(new Set([...(n.tags || []), ...(analysis.tags || []), ...(category === "Meeting" ? ["Meeting"] : [])])), aiSuggestions: suggestions, relatedNoteIds,
         };
       }));
       setActiveNote(prev => {
         if (!prev || prev.id !== note.id || prev.title !== note.title || prev.content !== note.content) return prev;
         return {
           ...prev, title: prev.title.trim() || analysis.title || prev.title, aiSummary: analysis.summary || prev.aiSummary,
-          category, tags: Array.from(new Set([...(prev.tags || []), ...(analysis.tags || [])])), aiSuggestions: suggestions, relatedNoteIds,
+          category, tags: Array.from(new Set([...(prev.tags || []), ...(analysis.tags || []), ...(category === "Meeting" ? ["Meeting"] : [])])), aiSuggestions: suggestions, relatedNoteIds,
         };
       });
       if (analysis.eventTitle) setCalendarEvent({ title: analysis.eventTitle, time: analysis.eventTime, description: note.content, location: analysis.eventLocation, participants: analysis.eventParticipants });
@@ -142,11 +165,12 @@ export default function App() {
   // Save the transcribed audio recording block as a brand new note !
   const handleSaveTranscriptAsNote = async (titleText: string, contentText: string, durationText?: string, audioUrl?: string): Promise<Note> => {
     const noteId = `note-${Date.now()}`;
+    const initialCategory = inferMeetingCategory(titleText, contentText);
     const newNote: Note = {
       id: noteId,
       title: titleText,
       content: contentText,
-      category: "Idea",
+      category: initialCategory,
       date: "Just now",
       pinned: false,
       collaborators: [],

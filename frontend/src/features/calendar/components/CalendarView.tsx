@@ -33,9 +33,13 @@ export default function CalendarView({ notes = [] }: CalendarViewProps) {
 
   // Dynamic user-authored scheduled reminders and events parsed via NLP helper
   const userEvents = notes
-    .filter((n) => (n.category === "Reminder" || n.category === "Event") && n.reminderTime)
+    .filter((n) => (n.category === "Reminder" || n.category === "Event" || n.category === "Meeting") && n.reminderTime)
     .map((n) => ({
-      time: n.category === "Reminder" ? "09:00 AM - Reminder" : "02:00 PM - Scheduled Event",
+      time: n.category === "Reminder"
+        ? "09:00 AM - Reminder"
+        : n.category === "Meeting"
+          ? "10:00 AM - Meeting"
+          : "02:00 PM - Scheduled Event",
       title: n.title,
       location: "Nova Voice/Type Capture",
       dateLabel: n.reminderTime || "Scheduled",
