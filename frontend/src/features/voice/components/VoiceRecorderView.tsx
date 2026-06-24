@@ -411,14 +411,13 @@ export default function VoiceRecorderView({
       const capturedAudio = await new Promise<{ url?: string; blob?: Blob }>((resolve) => {
         recorder.onstop = () => {
           const blob = new Blob(recordedChunksRef.current, { type: recorder.mimeType || "audio/webm" });
-          resolve(blob.size ? { url: URL.createObjectURL(blob), blob } : {});
+          resolve(blob.size ? { blob } : {});
         };
         try {
           recorder.requestData();
         } catch {}
         recorder.stop();
       });
-      audioUrl = capturedAudio.url;
       audioBlob = capturedAudio.blob;
     }
 
@@ -426,6 +425,13 @@ export default function VoiceRecorderView({
     // recognition remains a live preview only, so unsupported browsers still work.
     if (audioBlob) {
       try {
+        audioUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result || ""));
+          reader.onerror = () => reject(new Error("Could not encode the recorded audio."));
+          reader.readAsDataURL(audioBlob);
+        });
+
         const audioBase64 = await new Promise<string>((resolve, reject) => {
           const reader = new FileReader();
           reader.onload = () => resolve(String(reader.result).split(",")[1] || "");
@@ -500,17 +506,9 @@ export default function VoiceRecorderView({
         onAddToast("Unable to play this recording.", "error");
         handleStopPlayback();
       });
-    } else if (window.speechSynthesis) {
-      window.speechSynthesis.cancel();
-      const utterance = new SpeechSynthesisUtterance(note.content);
-      utterance.rate = 1.05;
-      utterance.onend = () => {
-        handleStopPlayback();
-      };
-      utterance.onerror = () => {
-        handleStopPlayback();
-      };
-      window.speechSynthesis.speak(utterance);
+    } else {
+      onAddToast("No saved audio is available for this voice note yet.", "error");
+      handleStopPlayback();
     }
   };
 

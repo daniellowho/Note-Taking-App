@@ -89,6 +89,27 @@ app.post("/api/ai/organize-note", async (req, res) => {
   const { title = "", content = "", notes = [] } = req.body;
   if (!content.trim()) return res.status(400).json({ error: "Note content is required." });
 
+  const fallbackOrganize = () => {
+    const sentences = content.split(/(?<=[.!?])\s+|\n+/).map((s: string) => s.trim()).filter(Boolean);
+    const hasMeeting = /\b(meeting|call|sync|appointment|standup|stand up|1:1|one on one|one-on-one|kickoff|demo)\b/i.test(`${title} ${content}`);
+    const isPersonal = /\b(i|my|family|home|personal)\b/i.test(content);
+    const taskMatches = sentences.filter((s: string) => /\b(finish|send|prepare|complete|follow up|need to|todo|action item|next step)\b/i.test(s)).slice(0, 3);
+    const timeMatch = content.match(/\b(tomorrow|today|monday|tuesday|wednesday|thursday|friday|saturday|sunday|\d{1,2}(?::\d{2})?\s?(?:am|pm))\b/i);
+    return {
+      title: title.trim() || (hasMeeting ? "Meeting note" : sentences[0]?.split(" ").slice(0, 6).join(" ") || "Untitled note"),
+      summary: sentences.slice(0, 3).map((s: string) => `* ${s}`).join("\n") || `* ${content.slice(0, 180)}`,
+      category: hasMeeting ? "Meeting" : taskMatches.length ? "Task" : isPersonal ? "Personal" : "General",
+      tags: hasMeeting ? ["Meeting"] : taskMatches.length ? ["Task"] : isPersonal ? ["Personal"] : ["Note"],
+      tasks: taskMatches,
+      reminder: taskMatches.length && timeMatch ? timeMatch[0] : "",
+      eventTitle: hasMeeting ? (title.trim() || "Meeting") : "",
+      eventTime: hasMeeting && timeMatch ? timeMatch[0] : "",
+      eventLocation: "",
+      eventParticipants: [],
+      isFallback: true,
+    };
+  };
+
   try {
     const ai = getAIClient();
     const response = await ai.models.generateContent({
@@ -109,23 +130,16 @@ app.post("/api/ai/organize-note", async (req, res) => {
         },
       },
     });
-    return res.json(JSON.parse(response.text || "{}"));
+    const rawText = (response.text || "").trim();
+    if (!rawText) return res.json(fallbackOrganize());
+    try {
+      return res.json(JSON.parse(rawText));
+    } catch (parseError) {
+      console.warn("Organize-note parse fallback triggered:", parseError);
+      return res.json(fallbackOrganize());
+    }
   } catch (error: any) {
-    const sentences = content.split(/(?<=[.!?])\s+|\n+/).map((s: string) => s.trim()).filter(Boolean);
-    const hasMeeting = /\b(meeting|call|sync|appointment)\b/i.test(content);
-    const isPersonal = /\b(i|my|family|home|personal)\b/i.test(content);
-    const taskMatches = sentences.filter((s: string) => /\b(finish|send|prepare|complete|follow up|need to|todo)\b/i.test(s)).slice(0, 3);
-    const timeMatch = content.match(/\b(tomorrow|today|monday|tuesday|wednesday|thursday|friday|saturday|sunday|\d{1,2}(?::\d{2})?\s?(?:am|pm))\b/i);
-    return res.json({
-      title: title.trim() || (hasMeeting ? "Meeting note" : sentences[0]?.split(" ").slice(0, 6).join(" ") || "Untitled note"),
-      summary: sentences.slice(0, 3).map((s: string) => `* ${s}`).join("\n"),
-      category: hasMeeting ? "Meeting" : taskMatches.length ? "Task" : isPersonal ? "Personal" : "General",
-      tags: hasMeeting ? ["Meeting"] : taskMatches.length ? ["Task"] : isPersonal ? ["Personal"] : ["Note"], tasks: taskMatches,
-      reminder: taskMatches.length && timeMatch ? timeMatch[0] : "",
-      eventTitle: hasMeeting ? (title.trim() || "Meeting") : "",
-      eventTime: hasMeeting && timeMatch ? timeMatch[0] : "",
-      isFallback: true,
-    });
+    return res.json(fallbackOrganize());
   }
 });
 

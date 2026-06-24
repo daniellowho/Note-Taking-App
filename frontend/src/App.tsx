@@ -122,7 +122,20 @@ export default function App() {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title: note.title, content: note.content, notes: notes.map(n => ({ id: n.id, title: n.title, content: n.content.slice(0, 200) })) }),
       });
-      const analysis = response.ok ? await response.json() : buildOrganizedFallback(note);
+      let analysis = buildOrganizedFallback(note);
+      if (response.ok) {
+        const contentType = response.headers.get("content-type") || "";
+        if (contentType.includes("application/json")) {
+          const raw = await response.text();
+          if (raw.trim()) {
+            try {
+              analysis = JSON.parse(raw);
+            } catch (parseError) {
+              console.warn("Organize response parse fallback triggered:", parseError);
+            }
+          }
+        }
+      }
       // Do not let an older background request overwrite a more recent save.
       if (organizationRequestIds.current[note.id] !== requestId) return;
       const relatedNoteIds = notes

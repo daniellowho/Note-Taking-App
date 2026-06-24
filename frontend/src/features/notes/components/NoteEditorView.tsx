@@ -51,6 +51,7 @@ export default function NoteEditorView({
   const [isDeleteClicked, setIsDeleteClicked] = useState(false);
 
   const audioIntervalRef = useRef<any>(null);
+  const audioPlayerRef = useRef<HTMLAudioElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Sync state if loading different note
@@ -65,6 +66,10 @@ export default function NoteEditorView({
     setIsPlayingAudio(false);
     setAudioProgress(0);
     setPlaybackTime(0);
+    if (audioPlayerRef.current) {
+      audioPlayerRef.current.pause();
+      audioPlayerRef.current = null;
+    }
 
     // If note is a voice or uploaded note, trigger a beautiful simulated real-time transcription loader on open
     if (note.source === 'voice' || note.source === 'uploaded') {
@@ -129,25 +134,32 @@ export default function NoteEditorView({
   };
 
   const handlePlayAudio = () => {
-    setIsPlayingAudio(true);
-    if (window.speechSynthesis) {
-      window.speechSynthesis.cancel();
-      const utterance = new SpeechSynthesisUtterance(content);
-      utterance.rate = 1.05;
-      utterance.onend = () => {
-        handlePauseAudio();
-      };
-      utterance.onerror = () => {
-        handlePauseAudio();
-      };
-      window.speechSynthesis.speak(utterance);
+    if (!note.audioUrl) {
+      onAddToast("This note does not have saved audio to play back.", "error");
+      return;
     }
+
+    setIsPlayingAudio(true);
+    const player = new Audio(note.audioUrl);
+    audioPlayerRef.current = player;
+    player.onended = () => {
+      handlePauseAudio();
+    };
+    player.onerror = () => {
+      onAddToast("Unable to play the saved recording.", "error");
+      handlePauseAudio();
+    };
+    player.play().catch(() => {
+      onAddToast("Unable to play the saved recording.", "error");
+      handlePauseAudio();
+    });
   };
 
   const handlePauseAudio = () => {
     setIsPlayingAudio(false);
-    if (window.speechSynthesis) {
-      window.speechSynthesis.cancel();
+    if (audioPlayerRef.current) {
+      audioPlayerRef.current.pause();
+      audioPlayerRef.current = null;
     }
   };
 
