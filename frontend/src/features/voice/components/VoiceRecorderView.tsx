@@ -66,6 +66,7 @@ export default function VoiceRecorderView({
   const [searchQuery, setSearchQuery] = useState("");
   const [recentSavedId, setRecentSavedId] = useState<string | null>(null);
   const [expandedSummaryId, setExpandedSummaryId] = useState<string | null>(null);
+  const [showMicPermissionPrompt, setShowMicPermissionPrompt] = useState(false);
 
   // Playback Animation States
   const [playingNoteId, setPlayingNoteId] = useState<string | null>(null);
@@ -237,7 +238,7 @@ export default function VoiceRecorderView({
         animationFrameRef.current = requestAnimationFrame(renderRealWave);
       } catch (err) {
         console.warn("Microphone access is required to record a voice memo:", err);
-        onAddToast("Microphone access was blocked. Please allow it and try again.", "error");
+        onAddToast("Microphone access was blocked. Enable microphone permission in your browser settings, then try again.", "error");
       }
     };
     setupRealAudio();
@@ -349,6 +350,7 @@ export default function VoiceRecorderView({
 
   // Start new Voice session
   const handleStartRecording = () => {
+    setShowMicPermissionPrompt(false);
     setSeconds(0);
     setTranscriptBlocks([]);
     setCurrentSpeech("");
@@ -361,7 +363,7 @@ export default function VoiceRecorderView({
   // Watch for shortcut autoStart signal
   useEffect(() => {
     if (autoStart) {
-      handleStartRecording();
+      setShowMicPermissionPrompt(true);
       if (onResetAutoStart) {
         onResetAutoStart();
       }
@@ -683,6 +685,41 @@ export default function VoiceRecorderView({
         
         // 2. IDLE HUB PAGE (Voice Library + Saved Archive)
         <div className="space-y-8">
+          {showMicPermissionPrompt && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm px-4">
+              <div className="w-full max-w-md rounded-3xl bg-surface-container-lowest border border-outline-variant/30 shadow-2xl p-6 animate-fade-in">
+                <div className="w-14 h-14 rounded-2xl bg-primary/10 text-primary flex items-center justify-center mb-5">
+                  <Mic size={26} />
+                </div>
+                <h3 className="text-xl font-extrabold text-on-surface tracking-tight mb-2">
+                  Allow microphone access
+                </h3>
+                <p className="text-sm text-on-surface-variant leading-relaxed mb-5">
+                  Nova needs your microphone to record and transcribe your voice memo. When your browser asks for permission, tap <span className="font-bold text-on-surface">Allow</span>.
+                </p>
+                <div className="rounded-2xl bg-surface-container p-4 mb-5">
+                  <p className="text-xs font-bold text-on-surface mb-1">If it still does not work:</p>
+                  <p className="text-[11px] text-on-surface-variant leading-relaxed">
+                    Open your browser site settings, allow Microphone for this website, then refresh the page.
+                  </p>
+                </div>
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => setShowMicPermissionPrompt(false)}
+                    className="flex-1 px-4 py-3 rounded-2xl bg-surface-container hover:bg-surface-container-high text-on-surface text-sm font-semibold transition-colors cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleStartRecording}
+                    className="flex-1 px-4 py-3 rounded-2xl bg-primary hover:bg-primary/95 text-on-primary text-sm font-semibold shadow-md transition-colors cursor-pointer"
+                  >
+                    Continue
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
           
           {/* Header Description */}
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-outline-variant/10 pb-6">
@@ -695,7 +732,7 @@ export default function VoiceRecorderView({
             
             {/* New Recording Button */}
             <button
-              onClick={handleStartRecording}
+              onClick={() => setShowMicPermissionPrompt(true)}
               className="px-6 py-3 bg-primary text-on-primary hover:bg-primary/95 font-semibold text-sm rounded-2xl shadow-md hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center gap-2 shrink-0 cursor-pointer"
               id="start-new-session-btn"
             >
@@ -851,7 +888,7 @@ export default function VoiceRecorderView({
                 </div>
                 {!searchQuery && (
                   <button
-                    onClick={handleStartRecording}
+                    onClick={() => setShowMicPermissionPrompt(true)}
                     className="mt-2 px-5 py-2 bg-primary/10 hover:bg-primary/15 text-primary font-bold text-xs rounded-xl transition-all cursor-pointer"
                   >
                     Create Your First Transcript
