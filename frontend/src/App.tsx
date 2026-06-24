@@ -40,6 +40,7 @@ export default function App() {
   const [calendarEvent, setCalendarEvent] = useState<{ title: string; time?: string; description: string; location?: string; participants?: string[] } | null>(null);
 
   const noteCategories: Note["category"][] = ["Strategy", "Draft", "Urgent", "Idea", "General", "Reminder", "Event", "Meeting", "Task", "Personal"];
+  const apiBaseUrl = (import.meta as any).env?.VITE_API_BASE_URL?.replace(/\/$/, "") || "";
 
   const normalizeCategory = (value: unknown, fallback: Note["category"] = "General"): Note["category"] => {
     if (typeof value !== "string") return fallback;
@@ -57,6 +58,26 @@ export default function App() {
       return "Event";
     }
     return "Idea";
+  };
+
+  const buildOrganizedFallback = (note: Note) => {
+    const sentences = note.content.split(/(?<=[.!?])\s+|\n+/).map((s) => s.trim()).filter(Boolean);
+    const hasMeeting = /\b(meeting|call|sync|appointment|standup|stand up|1:1|one on one|one-on-one|kickoff|demo)\b/i.test(`${note.title} ${note.content}`);
+    const taskMatches = sentences.filter((s) => /\b(finish|send|prepare|complete|follow up|need to|todo|action item|next step)\b/i.test(s)).slice(0, 3);
+    const category = hasMeeting ? "Meeting" : taskMatches.length ? "Task" : inferMeetingCategory(note.title, note.content);
+    return {
+      title: note.title.trim() || (hasMeeting ? "Meeting note" : sentences[0]?.split(" ").slice(0, 6).join(" ") || "Untitled note"),
+      summary: sentences.slice(0, 3).join(" ") || note.content.slice(0, 180),
+      category,
+      tags: hasMeeting ? ["Meeting"] : taskMatches.length ? ["Task"] : ["Note"],
+      tasks: taskMatches,
+      reminder: "",
+      eventTitle: hasMeeting ? (note.title.trim() || "Meeting") : "",
+      eventTime: "",
+      eventLocation: "",
+      eventParticipants: [],
+      isFallback: true,
+    };
   };
 
   // Sync state changes with localStorage for persistent state engine !
@@ -97,12 +118,11 @@ export default function App() {
     const requestId = (organizationRequestIds.current[note.id] || 0) + 1;
     organizationRequestIds.current[note.id] = requestId;
     try {
-      const response = await fetch("/api/ai/organize-note", {
+      const response = await fetch(`${apiBaseUrl}/api/ai/organize-note`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title: note.title, content: note.content, notes: notes.map(n => ({ id: n.id, title: n.title, content: n.content.slice(0, 200) })) }),
       });
-      if (!response.ok) return;
-      const analysis = await response.json();
+      const analysis = response.ok ? await response.json() : buildOrganizedFallback(note);
       // Do not let an older background request overwrite a more recent save.
       if (organizationRequestIds.current[note.id] !== requestId) return;
       const relatedNoteIds = notes
