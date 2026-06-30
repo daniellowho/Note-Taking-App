@@ -66,7 +66,7 @@ export default function App() {
     if (/\b(event|calendar|appointment|schedule)\b/i.test(text)) {
       return "Event";
     }
-    return "Idea";
+    return "General";
   };
 
   const buildOrganizedFallback = (note: Note) => {
@@ -352,6 +352,12 @@ export default function App() {
   };
 
   const handleDeleteNote = (id: string) => {
+    const note = notes.find((n) => n.id === id);
+    // Delete server-side audio file if it exists
+    if (note?.audioUrl && note.audioUrl.startsWith("/uploads/")) {
+      const filename = note.audioUrl.split("/").pop();
+      if (filename) fetch(`${apiBaseUrl}/api/audio/${filename}`, { method: "DELETE" }).catch(() => {});
+    }
     setNotes((prev) => prev.filter((n) => n.id !== id));
     addToast("Note deleted successfully", "info");
   };

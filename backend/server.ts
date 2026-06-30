@@ -1,5 +1,7 @@
 import express from "express";
 import path from "path";
+import fs from "fs";
+import multer from "multer";
 import { createServer as createViteServer } from "vite";
 import { Type, createPartFromBase64 } from "@google/genai";
 import { getAIClient } from "../ai/gemini";
@@ -8,6 +10,26 @@ const app = express();
 app.use(express.json({ limit: "20mb" }));
 
 const PORT = Number(process.env.PORT) || 3000;
+
+// Uploads directory — persistent audio storage
+const UPLOADS_DIR = path.join(process.cwd(), "uploads");
+if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+
+// Serve uploaded audio files as static assets
+app.use("/uploads", express.static(UPLOADS_DIR));
+
+// Multer: store audio with a timestamped filename, preserve extension from mime type
+const audioStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => cb(null, UPLOADS_DIR),
+  filename: (_req, file, cb) => {
+    const ext = file.mimetype.includes("ogg") ? ".ogg"
+      : file.mimetype.includes("mp4") ? ".mp4"
+      : file.mimetype.includes("webm") ? ".webm"
+      : ".audio";
+    cb(null, `audio-${Date.now()}${ext}`);
+  },
+});
+const upload = multer({ storage: audioStorage, limits: { fileSize: 50 * 1024 * 1024 } });
 
 // AI Endpoint: transcribe a recorded voice memo. This works even where the
 // browser's optional Web Speech API is unavailable.
@@ -556,6 +578,26 @@ Provide ONLY the raw JSON array in your output. Do not wrap it in markdown code 
   }
 });
 
+// Audio upload endpoint — saves the raw audio blob to disk, returns a permanent URL
+app.post("/api/audio/upload", upload.single("audio"), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: "No audio file received." });
+  const fileUrl = `/uploads/${req.file.filename}`;
+  return res.json({ url: fileUrl, filename: req.file.filename });
+});
+
+// Delete a saved audio file
+app.delete("/api/audio/:filename", (req, res) => {
+  const { filename } = req.params;
+  // Reject any path traversal attempts
+  if (filename.includes("/") || filename.includes("..")) {
+    return res.status(400).json({ error: "Invalid filename." });
+  }
+  const filePath = path.join(UPLOADS_DIR, filename);
+  if (!fs.existsSync(filePath)) return res.status(404).json({ error: "File not found." });
+  fs.unlinkSync(filePath);
+  return res.json({ success: true });
+});
+
 // AI Endpoint: Detect and extract money-related transactions from a note
 app.post("/api/ai/detect-money", async (req, res) => {
   const { content, noteId, existingTransactions = [] } = req.body;
@@ -569,7 +611,7 @@ app.post("/api/ai/detect-money", async (req, res) => {
     if (!amount) return { isMoneyRelated: false };
     const currencySymbol = content.match(/[₹$€£¥]/)?.[0] || "₹";
     const lower = content.toLowerCase();
-    const isOwe = /\b(i owe|i need to give|i have to give|i have to pay|i need to pay|give to|borrowed from)\b/.test(lower);
+    const isOwe = /\b(i owe|i need to give|i have to give|i have to pay|i need to pay|give to|given to|i gave|i paid to|borrowed from|lent to|i lent)\b/.test(lower);
     const isOwedToMe = /\b(owes me|has to give me|has to return|return me|give me|paid me|has to pay me)\b/.test(lower);
     const isExpense = /\b(spent|paid for|expense|bought|purchase)\b/.test(lower);
     const isIncome = /\b(received|got|earned|income|salary)\b/.test(lower);
@@ -626,15 +668,21 @@ Note: "${content}"
 
 Classification rules:
 - "Anshika has to give me ₹100" → direction: "Owes Me", person: "Anshika", status: "Pending"
+- "100 rs given to Anshika" → direction: "I Owe", person: "Anshika", status: "Pending"
+- "I gave 100 rupees to Anshika" → direction: "I Owe", person: "Anshika", status: "Paid"
 - "I need to give Rahul ₹500" → direction: "I Owe", person: "Rahul", status: "Pending"
 - "Paid ₹250 for dinner with Karan" → direction: "Expense", person: "Karan", status: "Paid"
 - "Received ₹500 from Dad" → direction: "Income", person: "Dad", status: "Received"
 - "Borrowed ₹1000 from Aman" → direction: "I Owe", person: "Aman", status: "Pending"
 - "Rahul paid me ₹500" → direction: "Owes Me", status: "Received", check if updatesTransactionId applies
-- If note says paid/settled/received/returned, set status accordingly and check existing transactions
-- Default currency ₹ if "rupees", "rs", "₹" mentioned; detect $ € £ otherwise
+- "gave 200 to Rohan" → direction: "I Owe", person: "Rohan", status: "Paid"
+- "Anshika owes me 500" → direction: "Owes Me", person: "Anshika", status: "Pending"
+- Currency: treat "rs", "rs.", "rupees", "rupee", "₹" all as currency "₹". Detect $ € £ otherwise.
+- "given to" / "gave to" / "paid to" → direction "I Owe" (money went FROM me TO person)
+- If note says paid/settled/received/returned/cleared, set status accordingly and check existing transactions
 - dueDate: extract if date mentioned ("on Friday", "by 30th June", "tomorrow")
-- updatesTransactionId: if this note clearly settles an existing pending transaction, return its id; else null or empty string
+- updatesTransactionId: if this note clearly settles an existing pending transaction, return its id; else empty string
+- If no monetary amount is mentioned, return isMoneyRelated: false
 
 Return JSON only.`,
       config: {

@@ -258,27 +258,19 @@ export default function VoiceRecorderView({
     };
   }, [isRecording]);
 
-  // Handle active audio playback simulations
+  // Animate waveform bars while playing (visual only, independent of audio)
   useEffect(() => {
     if (playingNoteId) {
-      const activeNote = notes.find(n => n.id === playingNoteId);
-      const totalSecs = activeNote ? 45 : 30; // mock total duration
-      
       playbackIntervalRef.current = setInterval(() => {
-        setPlaybackSeconds((prev) => {
-          const nextSecs = prev + 1;
-          setPlaybackProgress(Math.floor((Math.min(nextSecs, totalSecs) / totalSecs) * 100));
-          return nextSecs;
-        });
+        setPlaybackSeconds((prev) => prev + 1);
       }, 1000);
     } else {
       if (playbackIntervalRef.current) clearInterval(playbackIntervalRef.current);
     }
-
     return () => {
       if (playbackIntervalRef.current) clearInterval(playbackIntervalRef.current);
     };
-  }, [playingNoteId, notes]);
+  }, [playingNoteId]);
 
   const getCurrentTimestamp = useCallback(() => {
     const elapsed = elapsedSecondsRef.current;
@@ -474,26 +466,36 @@ export default function VoiceRecorderView({
     // recognition remains a live preview only, so unsupported browsers still work.
     if (audioBlob) {
       try {
-        audioUrl = await new Promise<string>((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve(String(reader.result || ""));
-          reader.onerror = () => reject(new Error("Could not encode the recorded audio."));
-          reader.readAsDataURL(audioBlob);
-        });
+        // Upload audio to server for permanent storage and transcription in parallel
+        const formData = new FormData();
+        formData.append("audio", audioBlob, `recording.${audioBlob.type.includes("ogg") ? "ogg" : audioBlob.type.includes("mp4") ? "mp4" : "webm"}`);
 
-        const audioBase64 = await new Promise<string>((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve(String(reader.result).split(",")[1] || "");
-          reader.onerror = () => reject(new Error("Could not read the recorded audio."));
-          reader.readAsDataURL(audioBlob);
-        });
-        const response = await fetch("/api/ai/transcribe", {
+        const [uploadRes, audioBase64] = await Promise.all([
+          fetch("/api/audio/upload", { method: "POST", body: formData }),
+          new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(String(reader.result).split(",")[1] || "");
+            reader.onerror = () => reject(new Error("Could not read the recorded audio."));
+            reader.readAsDataURL(audioBlob);
+          }),
+        ]);
+
+        if (uploadRes.ok) {
+          const uploadData = await uploadRes.json();
+          // Permanent server URL — survives page refreshes
+          audioUrl = uploadData.url;
+        } else {
+          // Fallback to blob URL for same-session playback if upload fails
+          audioUrl = URL.createObjectURL(audioBlob);
+        }
+
+        const transcribeRes = await fetch("/api/ai/transcribe", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           cache: "no-store",
           body: JSON.stringify({ audioBase64, mimeType: audioBlob.type || "audio/webm" }),
         });
-        const raw = await response.text();
+        const raw = await transcribeRes.text();
         if (raw.trim()) {
           try {
             const data = JSON.parse(raw);
@@ -501,11 +503,13 @@ export default function VoiceRecorderView({
           } catch (parseError) {
             console.warn("Transcription response parse fallback triggered:", parseError);
           }
-        } else if (!response.ok) {
+        } else if (!transcribeRes.ok) {
           console.warn("Server transcription failed with empty response body.");
         }
       } catch (error) {
-        console.warn("Server transcription failed:", error);
+        console.warn("Server transcription or upload failed:", error);
+        // Last-resort fallback so playback still works this session
+        if (audioBlob && !audioUrl) audioUrl = URL.createObjectURL(audioBlob);
       }
     }
 
@@ -547,24 +551,31 @@ export default function VoiceRecorderView({
     setPlayingNoteId(note.id);
     setPlaybackProgress(0);
     setPlaybackSeconds(0);
-    onAddToast(`Playing voice playback: "${note.title}"`, "info");
 
-    if (note.audioUrl) {
-      const player = new Audio(note.audioUrl);
-      audioPlayerRef.current = player;
-      player.onended = handleStopPlayback;
-      player.onerror = () => {
-        onAddToast("This recording can no longer be played. Record a new memo to save fresh audio.", "error");
-        handleStopPlayback();
-      };
-      player.play().catch(() => {
-        onAddToast("Unable to play this recording.", "error");
-        handleStopPlayback();
-      });
-    } else {
-      onAddToast("No saved audio is available for this voice note yet.", "error");
+    if (!note.audioUrl) {
+      onAddToast("No audio recorded for this note — only transcript is available.", "info");
       handleStopPlayback();
+      return;
     }
+
+    const player = new Audio(note.audioUrl);
+    audioPlayerRef.current = player;
+
+    player.ontimeupdate = () => {
+      if (player.duration && !isNaN(player.duration)) {
+        setPlaybackSeconds(Math.floor(player.currentTime));
+        setPlaybackProgress(Math.floor((player.currentTime / player.duration) * 100));
+      }
+    };
+    player.onended = handleStopPlayback;
+    player.onerror = () => {
+      onAddToast("Could not load audio. The file may have been removed from the server.", "error");
+      handleStopPlayback();
+    };
+    player.play().catch(() => {
+      onAddToast("Browser blocked audio playback. Try clicking play again.", "error");
+      handleStopPlayback();
+    });
   };
 
   const handleStopPlayback = () => {
