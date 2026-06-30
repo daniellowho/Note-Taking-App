@@ -556,6 +556,124 @@ Provide ONLY the raw JSON array in your output. Do not wrap it in markdown code 
   }
 });
 
+// AI Endpoint: Detect and extract money-related transactions from a note
+app.post("/api/ai/detect-money", async (req, res) => {
+  const { content, noteId, existingTransactions = [] } = req.body;
+  if (!content) return res.status(400).json({ error: "Content is required." });
+
+  const fallbackDetect = () => {
+    const amountMatch = content.match(/(?:[₹$€£¥])\s*(\d+(?:,\d+)*(?:\.\d+)?)|(\d+(?:,\d+)*(?:\.\d+)?)\s*(?:rupees?|rs\.?|inr)\b/i);
+    if (!amountMatch) return { isMoneyRelated: false };
+    const rawNum = (amountMatch[1] || amountMatch[2] || "").replace(/,/g, "");
+    const amount = parseFloat(rawNum);
+    if (!amount) return { isMoneyRelated: false };
+    const currencySymbol = content.match(/[₹$€£¥]/)?.[0] || "₹";
+    const lower = content.toLowerCase();
+    const isOwe = /\b(i owe|i need to give|i have to give|i have to pay|i need to pay|give to|borrowed from)\b/.test(lower);
+    const isOwedToMe = /\b(owes me|has to give me|has to return|return me|give me|paid me|has to pay me)\b/.test(lower);
+    const isExpense = /\b(spent|paid for|expense|bought|purchase)\b/.test(lower);
+    const isIncome = /\b(received|got|earned|income|salary)\b/.test(lower);
+    let direction: "I Owe" | "Owes Me" | "Expense" | "Income" = "Expense";
+    if (isOwe) direction = "I Owe";
+    else if (isOwedToMe) direction = "Owes Me";
+    else if (isIncome) direction = "Income";
+    const isPaid = /\b(paid|settled|cleared|sent|transferred|returned|received)\b/.test(lower);
+    const personMatch = content.match(/\b([A-Z][a-z]{2,})\b/);
+    const dueDateMatch = content.match(/\b(tomorrow|today|monday|tuesday|wednesday|thursday|friday|saturday|sunday|\d{1,2}(?:st|nd|rd|th)?\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*)\b/i);
+    // Check if this updates an existing transaction
+    let updatesTransactionId: string | null = null;
+    if (isPaid && existingTransactions.length > 0) {
+      const matchedTxn = existingTransactions.find((t: any) =>
+        t.person && personMatch && t.person.toLowerCase() === personMatch[1].toLowerCase() &&
+        Math.abs(t.amount - amount) < 1
+      );
+      if (matchedTxn) updatesTransactionId = matchedTxn.id;
+    }
+    return {
+      isMoneyRelated: true,
+      transaction: {
+        amount,
+        currency: currencySymbol,
+        person: personMatch?.[1],
+        direction,
+        status: isPaid ? (direction === "I Owe" ? "Paid" : "Received") : "Pending",
+        dueDate: dueDateMatch?.[0],
+      },
+      updatesTransactionId,
+    };
+  };
+
+  try {
+    const ai = getAIClient();
+    const existingSummary = existingTransactions.length > 0
+      ? `\n\nExisting transactions (check if new note settles any of these):\n${JSON.stringify(
+          existingTransactions.map((t: any) => ({
+            id: t.id,
+            person: t.person,
+            amount: t.amount,
+            direction: t.direction,
+            status: t.status,
+          })),
+          null, 2
+        )}`
+      : "";
+
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: `You are a financial note analyzer. Analyze if this note contains money information (debts, expenses, payments, income).${existingSummary}
+
+Note: "${content}"
+
+Classification rules:
+- "Anshika has to give me ₹100" → direction: "Owes Me", person: "Anshika", status: "Pending"
+- "I need to give Rahul ₹500" → direction: "I Owe", person: "Rahul", status: "Pending"
+- "Paid ₹250 for dinner with Karan" → direction: "Expense", person: "Karan", status: "Paid"
+- "Received ₹500 from Dad" → direction: "Income", person: "Dad", status: "Received"
+- "Borrowed ₹1000 from Aman" → direction: "I Owe", person: "Aman", status: "Pending"
+- "Rahul paid me ₹500" → direction: "Owes Me", status: "Received", check if updatesTransactionId applies
+- If note says paid/settled/received/returned, set status accordingly and check existing transactions
+- Default currency ₹ if "rupees", "rs", "₹" mentioned; detect $ € £ otherwise
+- dueDate: extract if date mentioned ("on Friday", "by 30th June", "tomorrow")
+- updatesTransactionId: if this note clearly settles an existing pending transaction, return its id; else null or empty string
+
+Return JSON only.`,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            isMoneyRelated: { type: Type.BOOLEAN },
+            transaction: {
+              type: Type.OBJECT,
+              properties: {
+                amount: { type: Type.NUMBER },
+                currency: { type: Type.STRING },
+                person: { type: Type.STRING },
+                direction: { type: Type.STRING },
+                status: { type: Type.STRING },
+                dueDate: { type: Type.STRING },
+              },
+            },
+            updatesTransactionId: { type: Type.STRING },
+          },
+          required: ["isMoneyRelated"],
+        },
+      },
+    });
+
+    const text = (response.text || "").trim();
+    if (!text) return res.json(fallbackDetect());
+    try {
+      return res.json(JSON.parse(text));
+    } catch {
+      return res.json(fallbackDetect());
+    }
+  } catch (error: any) {
+    console.error("Money detect error:", error);
+    return res.json(fallbackDetect());
+  }
+});
+
 // Serve frontend paths
 async function startServer() {
   if (process.env.NODE_ENV !== "production") {

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Note, Task } from "./types";
+import { Note, Task, MoneyTransaction } from "./types";
 import { INITIAL_NOTES, PROFILE_ME } from "./data";
 import Header from "./components/layout/Header";
 import Navigation from "./components/layout/Navigation";
@@ -10,6 +10,7 @@ import NoteEditorView from "./features/notes/components/NoteEditorView";
 import SummaryView from "./features/summary/components/SummaryView";
 import TasksView from "./features/tasks/components/TasksView";
 import CalendarView from "./features/calendar/components/CalendarView";
+import MoneyTrackerView from "./features/money/components/MoneyTrackerView";
 import { CheckCircle, Info, AlertTriangle, AlertCircle, Sparkles, Sliders, X, Check } from "lucide-react";
 
 interface ToastItem {
@@ -29,6 +30,14 @@ export default function App() {
       try { return JSON.parse(saved); } catch (e) { console.error(e); }
     }
     return INITIAL_NOTES;
+  });
+
+  const [moneyTransactions, setMoneyTransactions] = useState<MoneyTransaction[]>(() => {
+    const saved = localStorage.getItem("nova_money_data");
+    if (saved) {
+      try { return JSON.parse(saved); } catch (e) { console.error(e); }
+    }
+    return [];
   });
 
   const [activeNote, setActiveNote] = useState<Note | null>(null);
@@ -84,6 +93,85 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem("nova_notes_data", JSON.stringify(notes));
   }, [notes]);
+
+  useEffect(() => {
+    localStorage.setItem("nova_money_data", JSON.stringify(moneyTransactions));
+  }, [moneyTransactions]);
+
+  const detectAndStoreMoney = async (note: Note) => {
+    if (!note.content.trim()) return;
+    try {
+      const response = await fetch(`${apiBaseUrl}/api/ai/detect-money`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          content: `${note.title ? note.title + ". " : ""}${note.content}`,
+          noteId: note.id,
+          existingTransactions: moneyTransactions.filter((t) => t.status === "Pending"),
+        }),
+      });
+      if (!response.ok) return;
+      const data = await response.json();
+      if (!data.isMoneyRelated || !data.transaction) return;
+
+      const now = new Date().toISOString();
+      const txn = data.transaction;
+
+      // Normalize direction/status values from AI
+      const validDirections = ["I Owe", "Owes Me", "Expense", "Income"];
+      const validStatuses = ["Pending", "Paid", "Received", "Settled"];
+      const direction: MoneyTransaction["direction"] = validDirections.includes(txn.direction) ? txn.direction : "Expense";
+      const status: MoneyTransaction["status"] = validStatuses.includes(txn.status) ? txn.status : "Pending";
+
+      // If this note updates an existing transaction, update its status
+      if (data.updatesTransactionId) {
+        setMoneyTransactions((prev) =>
+          prev.map((t) =>
+            t.id === data.updatesTransactionId
+              ? { ...t, status, lastUpdated: now }
+              : t
+          )
+        );
+        addToast(`Transaction updated to ${status}.`, "info");
+        return;
+      }
+
+      // Avoid duplicate: same person + amount + direction within last 5 mins
+      const isDuplicate = moneyTransactions.some(
+        (t) =>
+          t.noteId === note.id ||
+          (t.person?.toLowerCase() === txn.person?.toLowerCase() &&
+            Math.abs(t.amount - txn.amount) < 0.01 &&
+            t.direction === direction &&
+            Date.now() - new Date(t.createdAt).getTime() < 5 * 60 * 1000)
+      );
+      if (isDuplicate) return;
+
+      const newTxn: MoneyTransaction = {
+        id: `money-${Date.now()}`,
+        amount: txn.amount,
+        currency: txn.currency || "₹",
+        person: txn.person,
+        direction,
+        status,
+        dueDate: txn.dueDate,
+        originalNote: `${note.title ? note.title + ": " : ""}${note.content}`.slice(0, 300),
+        noteId: note.id,
+        createdAt: now,
+        lastUpdated: now,
+      };
+
+      setMoneyTransactions((prev) => [newTxn, ...prev]);
+      addToast(`💰 Money entry added to tracker.`, "info");
+
+      // Reminder suggestion for due dates
+      if (txn.dueDate) {
+        addToast(`Reminder: ${txn.person ? txn.person + " — " : ""}${txn.currency || "₹"}${txn.amount} due ${txn.dueDate}`, "info");
+      }
+    } catch (err) {
+      // Silently ignore — money detection is best-effort
+    }
+  };
 
   const addToast = (text: string, type: "success" | "info" | "error") => {
     if (isVoiceRecordingActive) return; // Suppress enqueuing toasts during recording
@@ -185,6 +273,7 @@ export default function App() {
   const handleSaveAndOrganizeNote = (note: Note) => {
     handleSaveNote(note);
     void organizeNote(note);
+    void detectAndStoreMoney(note);
     setActiveNote(null);
     setActiveTab("notes");
     addToast("Note saved successfully.", "success");
@@ -217,6 +306,7 @@ export default function App() {
     setNotes((prev) => [newNote, ...prev]);
     addToast("Vocal transcript saved. Organizing quietly...", "info");
     void organizeNote(newNote);
+    void detectAndStoreMoney(newNote);
     return newNote;
   };
 
@@ -392,7 +482,15 @@ export default function App() {
           {/* Header Layout */}
           <Header
             onSearch={setSearchQuery}
-            title={activeTab === "home" ? "Home Space" : activeTab === "summary" ? "Daily Briefing" : activeTab === "notes" ? "Nova Notes" : activeTab === "voice" ? "AI Recorder" : activeTab === "tasks" ? "Focus Tasks" : "Calendar Plan"}
+            title={
+              activeTab === "home" ? "Home Space" :
+              activeTab === "summary" ? "Daily Briefing" :
+              activeTab === "notes" ? "Nova Notes" :
+              activeTab === "voice" ? "AI Recorder" :
+              activeTab === "tasks" ? "Focus Tasks" :
+              activeTab === "money" ? "Money Tracker" :
+              "Calendar Plan"
+            }
             onShowInfo={() => setShowSettings(true)}
           />
 
@@ -422,6 +520,7 @@ export default function App() {
                 onCreateNote={handleCreateNote}
                 onAddToast={addToast}
                 onTriggerTaskCreate={() => setTriggerTaskCreate(true)}
+                moneyTransactions={moneyTransactions}
               />
             )}
 
@@ -466,6 +565,21 @@ export default function App() {
 
             {activeTab === "calendar" && (
               <CalendarView notes={notes} />
+            )}
+
+            {activeTab === "money" && (
+              <MoneyTrackerView
+                transactions={moneyTransactions}
+                onUpdateTransaction={(id, updates) => {
+                  setMoneyTransactions((prev) =>
+                    prev.map((t) => (t.id === id ? { ...t, ...updates } : t))
+                  );
+                }}
+                onDeleteTransaction={(id) => {
+                  setMoneyTransactions((prev) => prev.filter((t) => t.id !== id));
+                }}
+                onAddToast={addToast}
+              />
             )}
           </main>
 

@@ -1,15 +1,18 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { 
-  Sparkles, 
-  Calendar, 
-  Clock, 
-  CheckSquare, 
-  FileText, 
-  AlertCircle, 
+import {
+  Sparkles,
+  Calendar,
+  Clock,
+  CheckSquare,
+  FileText,
+  AlertCircle,
   ChevronRight,
-  Bell
+  Bell,
+  Wallet,
+  ArrowDownLeft,
+  ArrowUpRight,
 } from "lucide-react";
-import { Note, Task } from "../../../types";
+import { Note, Task, MoneyTransaction } from "../../../types";
 import { motion } from "motion/react";
 
 interface SummaryViewProps {
@@ -18,6 +21,7 @@ interface SummaryViewProps {
   onCreateNote: () => void;
   onAddToast: (text: string, type: "success" | "info" | "error") => void;
   onTriggerTaskCreate?: () => void;
+  moneyTransactions?: MoneyTransaction[];
 }
 
 export default function SummaryView({
@@ -25,7 +29,8 @@ export default function SummaryView({
   setActiveTab,
   onCreateNote,
   onAddToast,
-  onTriggerTaskCreate
+  onTriggerTaskCreate,
+  moneyTransactions = [],
 }: SummaryViewProps) {
   const [loading, setLoading] = useState(true);
   const [insights, setInsights] = useState<string[]>([]);
@@ -194,6 +199,15 @@ export default function SummaryView({
   const recentNotesList = useMemo(() => {
     return [...notes].slice(0, 3);
   }, [notes]);
+
+  // 5. Money summary
+  const moneySummary = useMemo(() => {
+    const pending = moneyTransactions.filter((t) => t.status === "Pending");
+    const currency = moneyTransactions[0]?.currency || "₹";
+    const toReceive = pending.filter((t) => t.direction === "Owes Me").reduce((s, t) => s + t.amount, 0);
+    const toPay = pending.filter((t) => t.direction === "I Owe").reduce((s, t) => s + t.amount, 0);
+    return { toReceive, toPay, pendingCount: pending.length, currency, hasData: moneyTransactions.length > 0 };
+  }, [moneyTransactions]);
 
   // Distinct visual colored tags for day highlights
   const getDayColorTag = (dayStr: string) => {
@@ -469,7 +483,56 @@ export default function SummaryView({
         </section>
       )}
 
-      {/* SECTION 4: RECENT ACTIVITY (Continue where you left off) */}
+      {/* SECTION 4: MONEY SUMMARY (Only shown when transactions exist) */}
+      {moneySummary.hasData && (
+        <section className="mb-8" id="section-money-summary">
+          <div className="flex justify-between items-center mb-3">
+            <h2 className="text-[10px] font-extrabold uppercase tracking-widest text-[#006d36] font-mono flex items-center gap-1.5">
+              <Wallet size={11} strokeWidth={2.8} />
+              Money
+            </h2>
+            <button
+              onClick={() => setActiveTab("money")}
+              className="text-[10px] font-bold text-[#006d36] hover:underline flex items-center gap-1"
+            >
+              Open Tracker <ChevronRight size={10} />
+            </button>
+          </div>
+          <div className="bg-white border border-slate-100 rounded-2xl p-4 shadow-sm space-y-2.5">
+            {moneySummary.toReceive > 0 && (
+              <div className="flex items-center justify-between">
+                <span className="flex items-center gap-1.5 text-xs font-semibold text-slate-700">
+                  <ArrowDownLeft size={13} className="text-emerald-600" />
+                  To Receive
+                </span>
+                <span className="text-xs font-black text-emerald-700 font-mono">
+                  {moneySummary.currency}{moneySummary.toReceive.toLocaleString("en-IN")}
+                </span>
+              </div>
+            )}
+            {moneySummary.toPay > 0 && (
+              <div className="flex items-center justify-between">
+                <span className="flex items-center gap-1.5 text-xs font-semibold text-slate-700">
+                  <ArrowUpRight size={13} className="text-rose-500" />
+                  To Pay
+                </span>
+                <span className="text-xs font-black text-rose-600 font-mono">
+                  {moneySummary.currency}{moneySummary.toPay.toLocaleString("en-IN")}
+                </span>
+              </div>
+            )}
+            {moneySummary.pendingCount > 0 && (
+              <div className="pt-2 border-t border-slate-50">
+                <span className="text-[10px] text-slate-400 font-semibold">
+                  {moneySummary.pendingCount} pending {moneySummary.pendingCount === 1 ? "transaction" : "transactions"}
+                </span>
+              </div>
+            )}
+          </div>
+        </section>
+      )}
+
+      {/* SECTION 5: RECENT ACTIVITY (Continue where you left off) */}
       <section className="mb-12" id="section-recent-activity">
         <h2 className="text-[10px] font-extrabold uppercase tracking-widest text-slate-400 font-mono mb-3">
           Recent Activity

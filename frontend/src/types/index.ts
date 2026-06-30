@@ -32,6 +32,20 @@ export interface Task {
   reminderTime?: string; // e.g. "09:00 AM"
 }
 
+export interface MoneyTransaction {
+  id: string;
+  amount: number;
+  currency: string;
+  person?: string;
+  direction: 'I Owe' | 'Owes Me' | 'Expense' | 'Income';
+  status: 'Pending' | 'Paid' | 'Received' | 'Settled';
+  dueDate?: string;
+  originalNote: string;
+  noteId?: string;
+  createdAt: string;
+  lastUpdated: string;
+}
+
 export interface HighlightItem {
   id: string;
   title: string;

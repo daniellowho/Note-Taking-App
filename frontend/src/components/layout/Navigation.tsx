@@ -1,5 +1,5 @@
 import React from "react";
-import { Home, FileText, Sparkles, CheckSquare, Calendar, Settings, Mic } from "lucide-react";
+import { Home, FileText, Sparkles, CheckSquare, Calendar, Settings, Mic, Wallet } from "lucide-react";
 
 interface NavigationProps {
   activeTab: string;
@@ -11,6 +11,7 @@ const tabs = [
   { id: "home", label: "Home", icon: Home },
   { id: "notes", label: "Notes", icon: FileText },
   { id: "voice", label: "Voice", icon: Mic },
+  { id: "money", label: "Money", icon: Wallet },
   { id: "summary", label: "Summary", icon: Sparkles },
   { id: "tasks", label: "Tasks", icon: CheckSquare },
   { id: "calendar", label: "Calendar", icon: Calendar },
